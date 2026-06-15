@@ -1,0 +1,355 @@
+* =============================================================================
+* tb_pcn_route_test.spice — 16×32 module + routing layer_link integration test
+* Simulator: ngspice 42+
+* Run via:   ./run_sim.sh --netlist tb_pcn_route_test.spice
+*
+* Circuit: pcn_module_16x32 (mod0) + layer_link_route_16 (routing link)
+*   - mod0 row 0: inp_col_0=1.0V (+200mV above vcm=0.8V) → active differential input
+*   - All other columns balanced at vcm=0.8V
+*   - All 512 MAC weights initialised to 0.75V via .ic
+*   - Routing weight[0][0] pre-initialized to 0.75V to demonstrate Hebbian LTD write
+*     (all other routing weights at ~0V via 10GΩ bleeders)
+*   - vbias_n=0.760V for SF tail transistors in layer_link
+*   - vcm_route=0.65V routing Hebbian reference
+*   - PMOS SF (§71): sf_out ≈ iout_balance + |Vgs_P| ≈ 0.47 + 0.67 = 1.14V (LTP possible)
+*
+* Single tran (400ns), WE_route period=50ns (fires at t=50,100,150,200,250,300,350ns):
+*   t=0–50ns:   Settle — vw_route[0][0]=0.75V → XMPRED_r sinks ~28µA → ierr_dig=HIGH
+*   t=50–55ns:  WE_route pulse 1 — Hebbian fires: sf_out≈1.14V (PMOS SF; §71)
+*   t=100–105n: WE_route pulse 2 — LTD continues (weight decreasing)
+*   t=380ns:    T2 observations — trained state after 7 LTD pulses
+* =============================================================================
+.title PCN 16x32 routing test
+
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+.include "pcn_mac_cell.spice"
+.include "pcn_array_16x32.spice"
+.include "pcn_module_16x32.spice"
+.include "layer_link_route_16.spice"
+
+.options RELTOL=1e-3 ABSTOL=1e-12 GMIN=1e-12
+
+* ── Supply rails ─────────────────────────────────────────────────────────────
+Vdd   vdd  0  DC 1.8
+Vss   vss  0  DC 0
+Vcm   vcm  0  DC 0.8
+Vpi   vpi  0  DC 0.65
+Vcm_route  vcm_route  0  DC 0.65
+Vcm_iout  ncm_iout  0  DC 0.47
+Vbias_n  vbias_n  0  DC 0.760
+Vbias_p  vbias_p  0  DC 0.88
+
+* ── Column inputs — mod0 (16 rows × 32 cols) ─────────────────────────────────
+* Row 0 active: inp_col_0=1.0V, inn_col_0=vcm=0.8V (+200mV differential)
+* All other columns: balanced at vcm
+Vinp0  m0_inp0  0  DC 1.0
+Vinn0  m0_inn0  0  DC 0.8
+Vinp1  m0_inp1  0  DC 0.8
+Vinn1  m0_inn1  0  DC 0.8
+Vinp2  m0_inp2  0  DC 0.8
+Vinn2  m0_inn2  0  DC 0.8
+Vinp3  m0_inp3  0  DC 0.8
+Vinn3  m0_inn3  0  DC 0.8
+Vinp4  m0_inp4  0  DC 0.8
+Vinn4  m0_inn4  0  DC 0.8
+Vinp5  m0_inp5  0  DC 0.8
+Vinn5  m0_inn5  0  DC 0.8
+Vinp6  m0_inp6  0  DC 0.8
+Vinn6  m0_inn6  0  DC 0.8
+Vinp7  m0_inp7  0  DC 0.8
+Vinn7  m0_inn7  0  DC 0.8
+Vinp8  m0_inp8  0  DC 0.8
+Vinn8  m0_inn8  0  DC 0.8
+Vinp9  m0_inp9  0  DC 0.8
+Vinn9  m0_inn9  0  DC 0.8
+Vinp10  m0_inp10  0  DC 0.8
+Vinn10  m0_inn10  0  DC 0.8
+Vinp11  m0_inp11  0  DC 0.8
+Vinn11  m0_inn11  0  DC 0.8
+Vinp12  m0_inp12  0  DC 0.8
+Vinn12  m0_inn12  0  DC 0.8
+Vinp13  m0_inp13  0  DC 0.8
+Vinn13  m0_inn13  0  DC 0.8
+Vinp14  m0_inp14  0  DC 0.8
+Vinn14  m0_inn14  0  DC 0.8
+Vinp15  m0_inp15  0  DC 0.8
+Vinn15  m0_inn15  0  DC 0.8
+Vinp16  m0_inp16  0  DC 0.8
+Vinn16  m0_inn16  0  DC 0.8
+Vinp17  m0_inp17  0  DC 0.8
+Vinn17  m0_inn17  0  DC 0.8
+Vinp18  m0_inp18  0  DC 0.8
+Vinn18  m0_inn18  0  DC 0.8
+Vinp19  m0_inp19  0  DC 0.8
+Vinn19  m0_inn19  0  DC 0.8
+Vinp20  m0_inp20  0  DC 0.8
+Vinn20  m0_inn20  0  DC 0.8
+Vinp21  m0_inp21  0  DC 0.8
+Vinn21  m0_inn21  0  DC 0.8
+Vinp22  m0_inp22  0  DC 0.8
+Vinn22  m0_inn22  0  DC 0.8
+Vinp23  m0_inp23  0  DC 0.8
+Vinn23  m0_inn23  0  DC 0.8
+Vinp24  m0_inp24  0  DC 0.8
+Vinn24  m0_inn24  0  DC 0.8
+Vinp25  m0_inp25  0  DC 0.8
+Vinn25  m0_inn25  0  DC 0.8
+Vinp26  m0_inp26  0  DC 0.8
+Vinn26  m0_inn26  0  DC 0.8
+Vinp27  m0_inp27  0  DC 0.8
+Vinn27  m0_inn27  0  DC 0.8
+Vinp28  m0_inp28  0  DC 0.8
+Vinn28  m0_inn28  0  DC 0.8
+Vinp29  m0_inp29  0  DC 0.8
+Vinn29  m0_inn29  0  DC 0.8
+Vinp30  m0_inp30  0  DC 0.8
+Vinn30  m0_inn30  0  DC 0.8
+Vinp31  m0_inp31  0  DC 0.8
+Vinn31  m0_inn31  0  DC 0.8
+
+* ── WE_route: repeating 5ns pulses every 50ns (fires at t=50,100,150... ns) ─
+Vwe_route  we_route  0  PULSE(0 1.8 50n 1n 1n 5n 50n)
+
+* ── .ic — MAC weights (all 512 cells at 0.75V) and iwrite nodes at vcm ──────
+.ic V(xmod0.xarray.vw_0_0)=0.75  V(xmod0.xarray.vw_0_1)=0.75  V(xmod0.xarray.vw_0_2)=0.75  V(xmod0.xarray.vw_0_3)=0.75  V(xmod0.xarray.vw_0_4)=0.75  V(xmod0.xarray.vw_0_5)=0.75  V(xmod0.xarray.vw_0_6)=0.75  V(xmod0.xarray.vw_0_7)=0.75
+.ic V(xmod0.xarray.vw_0_8)=0.75  V(xmod0.xarray.vw_0_9)=0.75  V(xmod0.xarray.vw_0_10)=0.75  V(xmod0.xarray.vw_0_11)=0.75  V(xmod0.xarray.vw_0_12)=0.75  V(xmod0.xarray.vw_0_13)=0.75  V(xmod0.xarray.vw_0_14)=0.75  V(xmod0.xarray.vw_0_15)=0.75
+.ic V(xmod0.xarray.vw_0_16)=0.75  V(xmod0.xarray.vw_0_17)=0.75  V(xmod0.xarray.vw_0_18)=0.75  V(xmod0.xarray.vw_0_19)=0.75  V(xmod0.xarray.vw_0_20)=0.75  V(xmod0.xarray.vw_0_21)=0.75  V(xmod0.xarray.vw_0_22)=0.75  V(xmod0.xarray.vw_0_23)=0.75
+.ic V(xmod0.xarray.vw_0_24)=0.75  V(xmod0.xarray.vw_0_25)=0.75  V(xmod0.xarray.vw_0_26)=0.75  V(xmod0.xarray.vw_0_27)=0.75  V(xmod0.xarray.vw_0_28)=0.75  V(xmod0.xarray.vw_0_29)=0.75  V(xmod0.xarray.vw_0_30)=0.75  V(xmod0.xarray.vw_0_31)=0.75
+.ic V(xmod0.xarray.vw_1_0)=0.75  V(xmod0.xarray.vw_1_1)=0.75  V(xmod0.xarray.vw_1_2)=0.75  V(xmod0.xarray.vw_1_3)=0.75  V(xmod0.xarray.vw_1_4)=0.75  V(xmod0.xarray.vw_1_5)=0.75  V(xmod0.xarray.vw_1_6)=0.75  V(xmod0.xarray.vw_1_7)=0.75
+.ic V(xmod0.xarray.vw_1_8)=0.75  V(xmod0.xarray.vw_1_9)=0.75  V(xmod0.xarray.vw_1_10)=0.75  V(xmod0.xarray.vw_1_11)=0.75  V(xmod0.xarray.vw_1_12)=0.75  V(xmod0.xarray.vw_1_13)=0.75  V(xmod0.xarray.vw_1_14)=0.75  V(xmod0.xarray.vw_1_15)=0.75
+.ic V(xmod0.xarray.vw_1_16)=0.75  V(xmod0.xarray.vw_1_17)=0.75  V(xmod0.xarray.vw_1_18)=0.75  V(xmod0.xarray.vw_1_19)=0.75  V(xmod0.xarray.vw_1_20)=0.75  V(xmod0.xarray.vw_1_21)=0.75  V(xmod0.xarray.vw_1_22)=0.75  V(xmod0.xarray.vw_1_23)=0.75
+.ic V(xmod0.xarray.vw_1_24)=0.75  V(xmod0.xarray.vw_1_25)=0.75  V(xmod0.xarray.vw_1_26)=0.75  V(xmod0.xarray.vw_1_27)=0.75  V(xmod0.xarray.vw_1_28)=0.75  V(xmod0.xarray.vw_1_29)=0.75  V(xmod0.xarray.vw_1_30)=0.75  V(xmod0.xarray.vw_1_31)=0.75
+.ic V(xmod0.xarray.vw_2_0)=0.75  V(xmod0.xarray.vw_2_1)=0.75  V(xmod0.xarray.vw_2_2)=0.75  V(xmod0.xarray.vw_2_3)=0.75  V(xmod0.xarray.vw_2_4)=0.75  V(xmod0.xarray.vw_2_5)=0.75  V(xmod0.xarray.vw_2_6)=0.75  V(xmod0.xarray.vw_2_7)=0.75
+.ic V(xmod0.xarray.vw_2_8)=0.75  V(xmod0.xarray.vw_2_9)=0.75  V(xmod0.xarray.vw_2_10)=0.75  V(xmod0.xarray.vw_2_11)=0.75  V(xmod0.xarray.vw_2_12)=0.75  V(xmod0.xarray.vw_2_13)=0.75  V(xmod0.xarray.vw_2_14)=0.75  V(xmod0.xarray.vw_2_15)=0.75
+.ic V(xmod0.xarray.vw_2_16)=0.75  V(xmod0.xarray.vw_2_17)=0.75  V(xmod0.xarray.vw_2_18)=0.75  V(xmod0.xarray.vw_2_19)=0.75  V(xmod0.xarray.vw_2_20)=0.75  V(xmod0.xarray.vw_2_21)=0.75  V(xmod0.xarray.vw_2_22)=0.75  V(xmod0.xarray.vw_2_23)=0.75
+.ic V(xmod0.xarray.vw_2_24)=0.75  V(xmod0.xarray.vw_2_25)=0.75  V(xmod0.xarray.vw_2_26)=0.75  V(xmod0.xarray.vw_2_27)=0.75  V(xmod0.xarray.vw_2_28)=0.75  V(xmod0.xarray.vw_2_29)=0.75  V(xmod0.xarray.vw_2_30)=0.75  V(xmod0.xarray.vw_2_31)=0.75
+.ic V(xmod0.xarray.vw_3_0)=0.75  V(xmod0.xarray.vw_3_1)=0.75  V(xmod0.xarray.vw_3_2)=0.75  V(xmod0.xarray.vw_3_3)=0.75  V(xmod0.xarray.vw_3_4)=0.75  V(xmod0.xarray.vw_3_5)=0.75  V(xmod0.xarray.vw_3_6)=0.75  V(xmod0.xarray.vw_3_7)=0.75
+.ic V(xmod0.xarray.vw_3_8)=0.75  V(xmod0.xarray.vw_3_9)=0.75  V(xmod0.xarray.vw_3_10)=0.75  V(xmod0.xarray.vw_3_11)=0.75  V(xmod0.xarray.vw_3_12)=0.75  V(xmod0.xarray.vw_3_13)=0.75  V(xmod0.xarray.vw_3_14)=0.75  V(xmod0.xarray.vw_3_15)=0.75
+.ic V(xmod0.xarray.vw_3_16)=0.75  V(xmod0.xarray.vw_3_17)=0.75  V(xmod0.xarray.vw_3_18)=0.75  V(xmod0.xarray.vw_3_19)=0.75  V(xmod0.xarray.vw_3_20)=0.75  V(xmod0.xarray.vw_3_21)=0.75  V(xmod0.xarray.vw_3_22)=0.75  V(xmod0.xarray.vw_3_23)=0.75
+.ic V(xmod0.xarray.vw_3_24)=0.75  V(xmod0.xarray.vw_3_25)=0.75  V(xmod0.xarray.vw_3_26)=0.75  V(xmod0.xarray.vw_3_27)=0.75  V(xmod0.xarray.vw_3_28)=0.75  V(xmod0.xarray.vw_3_29)=0.75  V(xmod0.xarray.vw_3_30)=0.75  V(xmod0.xarray.vw_3_31)=0.75
+.ic V(xmod0.xarray.vw_4_0)=0.75  V(xmod0.xarray.vw_4_1)=0.75  V(xmod0.xarray.vw_4_2)=0.75  V(xmod0.xarray.vw_4_3)=0.75  V(xmod0.xarray.vw_4_4)=0.75  V(xmod0.xarray.vw_4_5)=0.75  V(xmod0.xarray.vw_4_6)=0.75  V(xmod0.xarray.vw_4_7)=0.75
+.ic V(xmod0.xarray.vw_4_8)=0.75  V(xmod0.xarray.vw_4_9)=0.75  V(xmod0.xarray.vw_4_10)=0.75  V(xmod0.xarray.vw_4_11)=0.75  V(xmod0.xarray.vw_4_12)=0.75  V(xmod0.xarray.vw_4_13)=0.75  V(xmod0.xarray.vw_4_14)=0.75  V(xmod0.xarray.vw_4_15)=0.75
+.ic V(xmod0.xarray.vw_4_16)=0.75  V(xmod0.xarray.vw_4_17)=0.75  V(xmod0.xarray.vw_4_18)=0.75  V(xmod0.xarray.vw_4_19)=0.75  V(xmod0.xarray.vw_4_20)=0.75  V(xmod0.xarray.vw_4_21)=0.75  V(xmod0.xarray.vw_4_22)=0.75  V(xmod0.xarray.vw_4_23)=0.75
+.ic V(xmod0.xarray.vw_4_24)=0.75  V(xmod0.xarray.vw_4_25)=0.75  V(xmod0.xarray.vw_4_26)=0.75  V(xmod0.xarray.vw_4_27)=0.75  V(xmod0.xarray.vw_4_28)=0.75  V(xmod0.xarray.vw_4_29)=0.75  V(xmod0.xarray.vw_4_30)=0.75  V(xmod0.xarray.vw_4_31)=0.75
+.ic V(xmod0.xarray.vw_5_0)=0.75  V(xmod0.xarray.vw_5_1)=0.75  V(xmod0.xarray.vw_5_2)=0.75  V(xmod0.xarray.vw_5_3)=0.75  V(xmod0.xarray.vw_5_4)=0.75  V(xmod0.xarray.vw_5_5)=0.75  V(xmod0.xarray.vw_5_6)=0.75  V(xmod0.xarray.vw_5_7)=0.75
+.ic V(xmod0.xarray.vw_5_8)=0.75  V(xmod0.xarray.vw_5_9)=0.75  V(xmod0.xarray.vw_5_10)=0.75  V(xmod0.xarray.vw_5_11)=0.75  V(xmod0.xarray.vw_5_12)=0.75  V(xmod0.xarray.vw_5_13)=0.75  V(xmod0.xarray.vw_5_14)=0.75  V(xmod0.xarray.vw_5_15)=0.75
+.ic V(xmod0.xarray.vw_5_16)=0.75  V(xmod0.xarray.vw_5_17)=0.75  V(xmod0.xarray.vw_5_18)=0.75  V(xmod0.xarray.vw_5_19)=0.75  V(xmod0.xarray.vw_5_20)=0.75  V(xmod0.xarray.vw_5_21)=0.75  V(xmod0.xarray.vw_5_22)=0.75  V(xmod0.xarray.vw_5_23)=0.75
+.ic V(xmod0.xarray.vw_5_24)=0.75  V(xmod0.xarray.vw_5_25)=0.75  V(xmod0.xarray.vw_5_26)=0.75  V(xmod0.xarray.vw_5_27)=0.75  V(xmod0.xarray.vw_5_28)=0.75  V(xmod0.xarray.vw_5_29)=0.75  V(xmod0.xarray.vw_5_30)=0.75  V(xmod0.xarray.vw_5_31)=0.75
+.ic V(xmod0.xarray.vw_6_0)=0.75  V(xmod0.xarray.vw_6_1)=0.75  V(xmod0.xarray.vw_6_2)=0.75  V(xmod0.xarray.vw_6_3)=0.75  V(xmod0.xarray.vw_6_4)=0.75  V(xmod0.xarray.vw_6_5)=0.75  V(xmod0.xarray.vw_6_6)=0.75  V(xmod0.xarray.vw_6_7)=0.75
+.ic V(xmod0.xarray.vw_6_8)=0.75  V(xmod0.xarray.vw_6_9)=0.75  V(xmod0.xarray.vw_6_10)=0.75  V(xmod0.xarray.vw_6_11)=0.75  V(xmod0.xarray.vw_6_12)=0.75  V(xmod0.xarray.vw_6_13)=0.75  V(xmod0.xarray.vw_6_14)=0.75  V(xmod0.xarray.vw_6_15)=0.75
+.ic V(xmod0.xarray.vw_6_16)=0.75  V(xmod0.xarray.vw_6_17)=0.75  V(xmod0.xarray.vw_6_18)=0.75  V(xmod0.xarray.vw_6_19)=0.75  V(xmod0.xarray.vw_6_20)=0.75  V(xmod0.xarray.vw_6_21)=0.75  V(xmod0.xarray.vw_6_22)=0.75  V(xmod0.xarray.vw_6_23)=0.75
+.ic V(xmod0.xarray.vw_6_24)=0.75  V(xmod0.xarray.vw_6_25)=0.75  V(xmod0.xarray.vw_6_26)=0.75  V(xmod0.xarray.vw_6_27)=0.75  V(xmod0.xarray.vw_6_28)=0.75  V(xmod0.xarray.vw_6_29)=0.75  V(xmod0.xarray.vw_6_30)=0.75  V(xmod0.xarray.vw_6_31)=0.75
+.ic V(xmod0.xarray.vw_7_0)=0.75  V(xmod0.xarray.vw_7_1)=0.75  V(xmod0.xarray.vw_7_2)=0.75  V(xmod0.xarray.vw_7_3)=0.75  V(xmod0.xarray.vw_7_4)=0.75  V(xmod0.xarray.vw_7_5)=0.75  V(xmod0.xarray.vw_7_6)=0.75  V(xmod0.xarray.vw_7_7)=0.75
+.ic V(xmod0.xarray.vw_7_8)=0.75  V(xmod0.xarray.vw_7_9)=0.75  V(xmod0.xarray.vw_7_10)=0.75  V(xmod0.xarray.vw_7_11)=0.75  V(xmod0.xarray.vw_7_12)=0.75  V(xmod0.xarray.vw_7_13)=0.75  V(xmod0.xarray.vw_7_14)=0.75  V(xmod0.xarray.vw_7_15)=0.75
+.ic V(xmod0.xarray.vw_7_16)=0.75  V(xmod0.xarray.vw_7_17)=0.75  V(xmod0.xarray.vw_7_18)=0.75  V(xmod0.xarray.vw_7_19)=0.75  V(xmod0.xarray.vw_7_20)=0.75  V(xmod0.xarray.vw_7_21)=0.75  V(xmod0.xarray.vw_7_22)=0.75  V(xmod0.xarray.vw_7_23)=0.75
+.ic V(xmod0.xarray.vw_7_24)=0.75  V(xmod0.xarray.vw_7_25)=0.75  V(xmod0.xarray.vw_7_26)=0.75  V(xmod0.xarray.vw_7_27)=0.75  V(xmod0.xarray.vw_7_28)=0.75  V(xmod0.xarray.vw_7_29)=0.75  V(xmod0.xarray.vw_7_30)=0.75  V(xmod0.xarray.vw_7_31)=0.75
+.ic V(xmod0.xarray.vw_8_0)=0.75  V(xmod0.xarray.vw_8_1)=0.75  V(xmod0.xarray.vw_8_2)=0.75  V(xmod0.xarray.vw_8_3)=0.75  V(xmod0.xarray.vw_8_4)=0.75  V(xmod0.xarray.vw_8_5)=0.75  V(xmod0.xarray.vw_8_6)=0.75  V(xmod0.xarray.vw_8_7)=0.75
+.ic V(xmod0.xarray.vw_8_8)=0.75  V(xmod0.xarray.vw_8_9)=0.75  V(xmod0.xarray.vw_8_10)=0.75  V(xmod0.xarray.vw_8_11)=0.75  V(xmod0.xarray.vw_8_12)=0.75  V(xmod0.xarray.vw_8_13)=0.75  V(xmod0.xarray.vw_8_14)=0.75  V(xmod0.xarray.vw_8_15)=0.75
+.ic V(xmod0.xarray.vw_8_16)=0.75  V(xmod0.xarray.vw_8_17)=0.75  V(xmod0.xarray.vw_8_18)=0.75  V(xmod0.xarray.vw_8_19)=0.75  V(xmod0.xarray.vw_8_20)=0.75  V(xmod0.xarray.vw_8_21)=0.75  V(xmod0.xarray.vw_8_22)=0.75  V(xmod0.xarray.vw_8_23)=0.75
+.ic V(xmod0.xarray.vw_8_24)=0.75  V(xmod0.xarray.vw_8_25)=0.75  V(xmod0.xarray.vw_8_26)=0.75  V(xmod0.xarray.vw_8_27)=0.75  V(xmod0.xarray.vw_8_28)=0.75  V(xmod0.xarray.vw_8_29)=0.75  V(xmod0.xarray.vw_8_30)=0.75  V(xmod0.xarray.vw_8_31)=0.75
+.ic V(xmod0.xarray.vw_9_0)=0.75  V(xmod0.xarray.vw_9_1)=0.75  V(xmod0.xarray.vw_9_2)=0.75  V(xmod0.xarray.vw_9_3)=0.75  V(xmod0.xarray.vw_9_4)=0.75  V(xmod0.xarray.vw_9_5)=0.75  V(xmod0.xarray.vw_9_6)=0.75  V(xmod0.xarray.vw_9_7)=0.75
+.ic V(xmod0.xarray.vw_9_8)=0.75  V(xmod0.xarray.vw_9_9)=0.75  V(xmod0.xarray.vw_9_10)=0.75  V(xmod0.xarray.vw_9_11)=0.75  V(xmod0.xarray.vw_9_12)=0.75  V(xmod0.xarray.vw_9_13)=0.75  V(xmod0.xarray.vw_9_14)=0.75  V(xmod0.xarray.vw_9_15)=0.75
+.ic V(xmod0.xarray.vw_9_16)=0.75  V(xmod0.xarray.vw_9_17)=0.75  V(xmod0.xarray.vw_9_18)=0.75  V(xmod0.xarray.vw_9_19)=0.75  V(xmod0.xarray.vw_9_20)=0.75  V(xmod0.xarray.vw_9_21)=0.75  V(xmod0.xarray.vw_9_22)=0.75  V(xmod0.xarray.vw_9_23)=0.75
+.ic V(xmod0.xarray.vw_9_24)=0.75  V(xmod0.xarray.vw_9_25)=0.75  V(xmod0.xarray.vw_9_26)=0.75  V(xmod0.xarray.vw_9_27)=0.75  V(xmod0.xarray.vw_9_28)=0.75  V(xmod0.xarray.vw_9_29)=0.75  V(xmod0.xarray.vw_9_30)=0.75  V(xmod0.xarray.vw_9_31)=0.75
+.ic V(xmod0.xarray.vw_10_0)=0.75  V(xmod0.xarray.vw_10_1)=0.75  V(xmod0.xarray.vw_10_2)=0.75  V(xmod0.xarray.vw_10_3)=0.75  V(xmod0.xarray.vw_10_4)=0.75  V(xmod0.xarray.vw_10_5)=0.75  V(xmod0.xarray.vw_10_6)=0.75  V(xmod0.xarray.vw_10_7)=0.75
+.ic V(xmod0.xarray.vw_10_8)=0.75  V(xmod0.xarray.vw_10_9)=0.75  V(xmod0.xarray.vw_10_10)=0.75  V(xmod0.xarray.vw_10_11)=0.75  V(xmod0.xarray.vw_10_12)=0.75  V(xmod0.xarray.vw_10_13)=0.75  V(xmod0.xarray.vw_10_14)=0.75  V(xmod0.xarray.vw_10_15)=0.75
+.ic V(xmod0.xarray.vw_10_16)=0.75  V(xmod0.xarray.vw_10_17)=0.75  V(xmod0.xarray.vw_10_18)=0.75  V(xmod0.xarray.vw_10_19)=0.75  V(xmod0.xarray.vw_10_20)=0.75  V(xmod0.xarray.vw_10_21)=0.75  V(xmod0.xarray.vw_10_22)=0.75  V(xmod0.xarray.vw_10_23)=0.75
+.ic V(xmod0.xarray.vw_10_24)=0.75  V(xmod0.xarray.vw_10_25)=0.75  V(xmod0.xarray.vw_10_26)=0.75  V(xmod0.xarray.vw_10_27)=0.75  V(xmod0.xarray.vw_10_28)=0.75  V(xmod0.xarray.vw_10_29)=0.75  V(xmod0.xarray.vw_10_30)=0.75  V(xmod0.xarray.vw_10_31)=0.75
+.ic V(xmod0.xarray.vw_11_0)=0.75  V(xmod0.xarray.vw_11_1)=0.75  V(xmod0.xarray.vw_11_2)=0.75  V(xmod0.xarray.vw_11_3)=0.75  V(xmod0.xarray.vw_11_4)=0.75  V(xmod0.xarray.vw_11_5)=0.75  V(xmod0.xarray.vw_11_6)=0.75  V(xmod0.xarray.vw_11_7)=0.75
+.ic V(xmod0.xarray.vw_11_8)=0.75  V(xmod0.xarray.vw_11_9)=0.75  V(xmod0.xarray.vw_11_10)=0.75  V(xmod0.xarray.vw_11_11)=0.75  V(xmod0.xarray.vw_11_12)=0.75  V(xmod0.xarray.vw_11_13)=0.75  V(xmod0.xarray.vw_11_14)=0.75  V(xmod0.xarray.vw_11_15)=0.75
+.ic V(xmod0.xarray.vw_11_16)=0.75  V(xmod0.xarray.vw_11_17)=0.75  V(xmod0.xarray.vw_11_18)=0.75  V(xmod0.xarray.vw_11_19)=0.75  V(xmod0.xarray.vw_11_20)=0.75  V(xmod0.xarray.vw_11_21)=0.75  V(xmod0.xarray.vw_11_22)=0.75  V(xmod0.xarray.vw_11_23)=0.75
+.ic V(xmod0.xarray.vw_11_24)=0.75  V(xmod0.xarray.vw_11_25)=0.75  V(xmod0.xarray.vw_11_26)=0.75  V(xmod0.xarray.vw_11_27)=0.75  V(xmod0.xarray.vw_11_28)=0.75  V(xmod0.xarray.vw_11_29)=0.75  V(xmod0.xarray.vw_11_30)=0.75  V(xmod0.xarray.vw_11_31)=0.75
+.ic V(xmod0.xarray.vw_12_0)=0.75  V(xmod0.xarray.vw_12_1)=0.75  V(xmod0.xarray.vw_12_2)=0.75  V(xmod0.xarray.vw_12_3)=0.75  V(xmod0.xarray.vw_12_4)=0.75  V(xmod0.xarray.vw_12_5)=0.75  V(xmod0.xarray.vw_12_6)=0.75  V(xmod0.xarray.vw_12_7)=0.75
+.ic V(xmod0.xarray.vw_12_8)=0.75  V(xmod0.xarray.vw_12_9)=0.75  V(xmod0.xarray.vw_12_10)=0.75  V(xmod0.xarray.vw_12_11)=0.75  V(xmod0.xarray.vw_12_12)=0.75  V(xmod0.xarray.vw_12_13)=0.75  V(xmod0.xarray.vw_12_14)=0.75  V(xmod0.xarray.vw_12_15)=0.75
+.ic V(xmod0.xarray.vw_12_16)=0.75  V(xmod0.xarray.vw_12_17)=0.75  V(xmod0.xarray.vw_12_18)=0.75  V(xmod0.xarray.vw_12_19)=0.75  V(xmod0.xarray.vw_12_20)=0.75  V(xmod0.xarray.vw_12_21)=0.75  V(xmod0.xarray.vw_12_22)=0.75  V(xmod0.xarray.vw_12_23)=0.75
+.ic V(xmod0.xarray.vw_12_24)=0.75  V(xmod0.xarray.vw_12_25)=0.75  V(xmod0.xarray.vw_12_26)=0.75  V(xmod0.xarray.vw_12_27)=0.75  V(xmod0.xarray.vw_12_28)=0.75  V(xmod0.xarray.vw_12_29)=0.75  V(xmod0.xarray.vw_12_30)=0.75  V(xmod0.xarray.vw_12_31)=0.75
+.ic V(xmod0.xarray.vw_13_0)=0.75  V(xmod0.xarray.vw_13_1)=0.75  V(xmod0.xarray.vw_13_2)=0.75  V(xmod0.xarray.vw_13_3)=0.75  V(xmod0.xarray.vw_13_4)=0.75  V(xmod0.xarray.vw_13_5)=0.75  V(xmod0.xarray.vw_13_6)=0.75  V(xmod0.xarray.vw_13_7)=0.75
+.ic V(xmod0.xarray.vw_13_8)=0.75  V(xmod0.xarray.vw_13_9)=0.75  V(xmod0.xarray.vw_13_10)=0.75  V(xmod0.xarray.vw_13_11)=0.75  V(xmod0.xarray.vw_13_12)=0.75  V(xmod0.xarray.vw_13_13)=0.75  V(xmod0.xarray.vw_13_14)=0.75  V(xmod0.xarray.vw_13_15)=0.75
+.ic V(xmod0.xarray.vw_13_16)=0.75  V(xmod0.xarray.vw_13_17)=0.75  V(xmod0.xarray.vw_13_18)=0.75  V(xmod0.xarray.vw_13_19)=0.75  V(xmod0.xarray.vw_13_20)=0.75  V(xmod0.xarray.vw_13_21)=0.75  V(xmod0.xarray.vw_13_22)=0.75  V(xmod0.xarray.vw_13_23)=0.75
+.ic V(xmod0.xarray.vw_13_24)=0.75  V(xmod0.xarray.vw_13_25)=0.75  V(xmod0.xarray.vw_13_26)=0.75  V(xmod0.xarray.vw_13_27)=0.75  V(xmod0.xarray.vw_13_28)=0.75  V(xmod0.xarray.vw_13_29)=0.75  V(xmod0.xarray.vw_13_30)=0.75  V(xmod0.xarray.vw_13_31)=0.75
+.ic V(xmod0.xarray.vw_14_0)=0.75  V(xmod0.xarray.vw_14_1)=0.75  V(xmod0.xarray.vw_14_2)=0.75  V(xmod0.xarray.vw_14_3)=0.75  V(xmod0.xarray.vw_14_4)=0.75  V(xmod0.xarray.vw_14_5)=0.75  V(xmod0.xarray.vw_14_6)=0.75  V(xmod0.xarray.vw_14_7)=0.75
+.ic V(xmod0.xarray.vw_14_8)=0.75  V(xmod0.xarray.vw_14_9)=0.75  V(xmod0.xarray.vw_14_10)=0.75  V(xmod0.xarray.vw_14_11)=0.75  V(xmod0.xarray.vw_14_12)=0.75  V(xmod0.xarray.vw_14_13)=0.75  V(xmod0.xarray.vw_14_14)=0.75  V(xmod0.xarray.vw_14_15)=0.75
+.ic V(xmod0.xarray.vw_14_16)=0.75  V(xmod0.xarray.vw_14_17)=0.75  V(xmod0.xarray.vw_14_18)=0.75  V(xmod0.xarray.vw_14_19)=0.75  V(xmod0.xarray.vw_14_20)=0.75  V(xmod0.xarray.vw_14_21)=0.75  V(xmod0.xarray.vw_14_22)=0.75  V(xmod0.xarray.vw_14_23)=0.75
+.ic V(xmod0.xarray.vw_14_24)=0.75  V(xmod0.xarray.vw_14_25)=0.75  V(xmod0.xarray.vw_14_26)=0.75  V(xmod0.xarray.vw_14_27)=0.75  V(xmod0.xarray.vw_14_28)=0.75  V(xmod0.xarray.vw_14_29)=0.75  V(xmod0.xarray.vw_14_30)=0.75  V(xmod0.xarray.vw_14_31)=0.75
+.ic V(xmod0.xarray.vw_15_0)=0.75  V(xmod0.xarray.vw_15_1)=0.75  V(xmod0.xarray.vw_15_2)=0.75  V(xmod0.xarray.vw_15_3)=0.75  V(xmod0.xarray.vw_15_4)=0.75  V(xmod0.xarray.vw_15_5)=0.75  V(xmod0.xarray.vw_15_6)=0.75  V(xmod0.xarray.vw_15_7)=0.75
+.ic V(xmod0.xarray.vw_15_8)=0.75  V(xmod0.xarray.vw_15_9)=0.75  V(xmod0.xarray.vw_15_10)=0.75  V(xmod0.xarray.vw_15_11)=0.75  V(xmod0.xarray.vw_15_12)=0.75  V(xmod0.xarray.vw_15_13)=0.75  V(xmod0.xarray.vw_15_14)=0.75  V(xmod0.xarray.vw_15_15)=0.75
+.ic V(xmod0.xarray.vw_15_16)=0.75  V(xmod0.xarray.vw_15_17)=0.75  V(xmod0.xarray.vw_15_18)=0.75  V(xmod0.xarray.vw_15_19)=0.75  V(xmod0.xarray.vw_15_20)=0.75  V(xmod0.xarray.vw_15_21)=0.75  V(xmod0.xarray.vw_15_22)=0.75  V(xmod0.xarray.vw_15_23)=0.75
+.ic V(xmod0.xarray.vw_15_24)=0.75  V(xmod0.xarray.vw_15_25)=0.75  V(xmod0.xarray.vw_15_26)=0.75  V(xmod0.xarray.vw_15_27)=0.75  V(xmod0.xarray.vw_15_28)=0.75  V(xmod0.xarray.vw_15_29)=0.75  V(xmod0.xarray.vw_15_30)=0.75  V(xmod0.xarray.vw_15_31)=0.75
+.ic V(xmod0.xarray.iwrite_0_0)=0.9  V(xmod0.xarray.iwrite_0_1)=0.9  V(xmod0.xarray.iwrite_0_2)=0.9  V(xmod0.xarray.iwrite_0_3)=0.9  V(xmod0.xarray.iwrite_0_4)=0.9  V(xmod0.xarray.iwrite_0_5)=0.9  V(xmod0.xarray.iwrite_0_6)=0.9  V(xmod0.xarray.iwrite_0_7)=0.9
+.ic V(xmod0.xarray.iwrite_0_8)=0.9  V(xmod0.xarray.iwrite_0_9)=0.9  V(xmod0.xarray.iwrite_0_10)=0.9  V(xmod0.xarray.iwrite_0_11)=0.9  V(xmod0.xarray.iwrite_0_12)=0.9  V(xmod0.xarray.iwrite_0_13)=0.9  V(xmod0.xarray.iwrite_0_14)=0.9  V(xmod0.xarray.iwrite_0_15)=0.9
+.ic V(xmod0.xarray.iwrite_0_16)=0.9  V(xmod0.xarray.iwrite_0_17)=0.9  V(xmod0.xarray.iwrite_0_18)=0.9  V(xmod0.xarray.iwrite_0_19)=0.9  V(xmod0.xarray.iwrite_0_20)=0.9  V(xmod0.xarray.iwrite_0_21)=0.9  V(xmod0.xarray.iwrite_0_22)=0.9  V(xmod0.xarray.iwrite_0_23)=0.9
+.ic V(xmod0.xarray.iwrite_0_24)=0.9  V(xmod0.xarray.iwrite_0_25)=0.9  V(xmod0.xarray.iwrite_0_26)=0.9  V(xmod0.xarray.iwrite_0_27)=0.9  V(xmod0.xarray.iwrite_0_28)=0.9  V(xmod0.xarray.iwrite_0_29)=0.9  V(xmod0.xarray.iwrite_0_30)=0.9  V(xmod0.xarray.iwrite_0_31)=0.9
+.ic V(xmod0.xarray.iwrite_1_0)=0.9  V(xmod0.xarray.iwrite_1_1)=0.9  V(xmod0.xarray.iwrite_1_2)=0.9  V(xmod0.xarray.iwrite_1_3)=0.9  V(xmod0.xarray.iwrite_1_4)=0.9  V(xmod0.xarray.iwrite_1_5)=0.9  V(xmod0.xarray.iwrite_1_6)=0.9  V(xmod0.xarray.iwrite_1_7)=0.9
+.ic V(xmod0.xarray.iwrite_1_8)=0.9  V(xmod0.xarray.iwrite_1_9)=0.9  V(xmod0.xarray.iwrite_1_10)=0.9  V(xmod0.xarray.iwrite_1_11)=0.9  V(xmod0.xarray.iwrite_1_12)=0.9  V(xmod0.xarray.iwrite_1_13)=0.9  V(xmod0.xarray.iwrite_1_14)=0.9  V(xmod0.xarray.iwrite_1_15)=0.9
+.ic V(xmod0.xarray.iwrite_1_16)=0.9  V(xmod0.xarray.iwrite_1_17)=0.9  V(xmod0.xarray.iwrite_1_18)=0.9  V(xmod0.xarray.iwrite_1_19)=0.9  V(xmod0.xarray.iwrite_1_20)=0.9  V(xmod0.xarray.iwrite_1_21)=0.9  V(xmod0.xarray.iwrite_1_22)=0.9  V(xmod0.xarray.iwrite_1_23)=0.9
+.ic V(xmod0.xarray.iwrite_1_24)=0.9  V(xmod0.xarray.iwrite_1_25)=0.9  V(xmod0.xarray.iwrite_1_26)=0.9  V(xmod0.xarray.iwrite_1_27)=0.9  V(xmod0.xarray.iwrite_1_28)=0.9  V(xmod0.xarray.iwrite_1_29)=0.9  V(xmod0.xarray.iwrite_1_30)=0.9  V(xmod0.xarray.iwrite_1_31)=0.9
+.ic V(xmod0.xarray.iwrite_2_0)=0.9  V(xmod0.xarray.iwrite_2_1)=0.9  V(xmod0.xarray.iwrite_2_2)=0.9  V(xmod0.xarray.iwrite_2_3)=0.9  V(xmod0.xarray.iwrite_2_4)=0.9  V(xmod0.xarray.iwrite_2_5)=0.9  V(xmod0.xarray.iwrite_2_6)=0.9  V(xmod0.xarray.iwrite_2_7)=0.9
+.ic V(xmod0.xarray.iwrite_2_8)=0.9  V(xmod0.xarray.iwrite_2_9)=0.9  V(xmod0.xarray.iwrite_2_10)=0.9  V(xmod0.xarray.iwrite_2_11)=0.9  V(xmod0.xarray.iwrite_2_12)=0.9  V(xmod0.xarray.iwrite_2_13)=0.9  V(xmod0.xarray.iwrite_2_14)=0.9  V(xmod0.xarray.iwrite_2_15)=0.9
+.ic V(xmod0.xarray.iwrite_2_16)=0.9  V(xmod0.xarray.iwrite_2_17)=0.9  V(xmod0.xarray.iwrite_2_18)=0.9  V(xmod0.xarray.iwrite_2_19)=0.9  V(xmod0.xarray.iwrite_2_20)=0.9  V(xmod0.xarray.iwrite_2_21)=0.9  V(xmod0.xarray.iwrite_2_22)=0.9  V(xmod0.xarray.iwrite_2_23)=0.9
+.ic V(xmod0.xarray.iwrite_2_24)=0.9  V(xmod0.xarray.iwrite_2_25)=0.9  V(xmod0.xarray.iwrite_2_26)=0.9  V(xmod0.xarray.iwrite_2_27)=0.9  V(xmod0.xarray.iwrite_2_28)=0.9  V(xmod0.xarray.iwrite_2_29)=0.9  V(xmod0.xarray.iwrite_2_30)=0.9  V(xmod0.xarray.iwrite_2_31)=0.9
+.ic V(xmod0.xarray.iwrite_3_0)=0.9  V(xmod0.xarray.iwrite_3_1)=0.9  V(xmod0.xarray.iwrite_3_2)=0.9  V(xmod0.xarray.iwrite_3_3)=0.9  V(xmod0.xarray.iwrite_3_4)=0.9  V(xmod0.xarray.iwrite_3_5)=0.9  V(xmod0.xarray.iwrite_3_6)=0.9  V(xmod0.xarray.iwrite_3_7)=0.9
+.ic V(xmod0.xarray.iwrite_3_8)=0.9  V(xmod0.xarray.iwrite_3_9)=0.9  V(xmod0.xarray.iwrite_3_10)=0.9  V(xmod0.xarray.iwrite_3_11)=0.9  V(xmod0.xarray.iwrite_3_12)=0.9  V(xmod0.xarray.iwrite_3_13)=0.9  V(xmod0.xarray.iwrite_3_14)=0.9  V(xmod0.xarray.iwrite_3_15)=0.9
+.ic V(xmod0.xarray.iwrite_3_16)=0.9  V(xmod0.xarray.iwrite_3_17)=0.9  V(xmod0.xarray.iwrite_3_18)=0.9  V(xmod0.xarray.iwrite_3_19)=0.9  V(xmod0.xarray.iwrite_3_20)=0.9  V(xmod0.xarray.iwrite_3_21)=0.9  V(xmod0.xarray.iwrite_3_22)=0.9  V(xmod0.xarray.iwrite_3_23)=0.9
+.ic V(xmod0.xarray.iwrite_3_24)=0.9  V(xmod0.xarray.iwrite_3_25)=0.9  V(xmod0.xarray.iwrite_3_26)=0.9  V(xmod0.xarray.iwrite_3_27)=0.9  V(xmod0.xarray.iwrite_3_28)=0.9  V(xmod0.xarray.iwrite_3_29)=0.9  V(xmod0.xarray.iwrite_3_30)=0.9  V(xmod0.xarray.iwrite_3_31)=0.9
+.ic V(xmod0.xarray.iwrite_4_0)=0.9  V(xmod0.xarray.iwrite_4_1)=0.9  V(xmod0.xarray.iwrite_4_2)=0.9  V(xmod0.xarray.iwrite_4_3)=0.9  V(xmod0.xarray.iwrite_4_4)=0.9  V(xmod0.xarray.iwrite_4_5)=0.9  V(xmod0.xarray.iwrite_4_6)=0.9  V(xmod0.xarray.iwrite_4_7)=0.9
+.ic V(xmod0.xarray.iwrite_4_8)=0.9  V(xmod0.xarray.iwrite_4_9)=0.9  V(xmod0.xarray.iwrite_4_10)=0.9  V(xmod0.xarray.iwrite_4_11)=0.9  V(xmod0.xarray.iwrite_4_12)=0.9  V(xmod0.xarray.iwrite_4_13)=0.9  V(xmod0.xarray.iwrite_4_14)=0.9  V(xmod0.xarray.iwrite_4_15)=0.9
+.ic V(xmod0.xarray.iwrite_4_16)=0.9  V(xmod0.xarray.iwrite_4_17)=0.9  V(xmod0.xarray.iwrite_4_18)=0.9  V(xmod0.xarray.iwrite_4_19)=0.9  V(xmod0.xarray.iwrite_4_20)=0.9  V(xmod0.xarray.iwrite_4_21)=0.9  V(xmod0.xarray.iwrite_4_22)=0.9  V(xmod0.xarray.iwrite_4_23)=0.9
+.ic V(xmod0.xarray.iwrite_4_24)=0.9  V(xmod0.xarray.iwrite_4_25)=0.9  V(xmod0.xarray.iwrite_4_26)=0.9  V(xmod0.xarray.iwrite_4_27)=0.9  V(xmod0.xarray.iwrite_4_28)=0.9  V(xmod0.xarray.iwrite_4_29)=0.9  V(xmod0.xarray.iwrite_4_30)=0.9  V(xmod0.xarray.iwrite_4_31)=0.9
+.ic V(xmod0.xarray.iwrite_5_0)=0.9  V(xmod0.xarray.iwrite_5_1)=0.9  V(xmod0.xarray.iwrite_5_2)=0.9  V(xmod0.xarray.iwrite_5_3)=0.9  V(xmod0.xarray.iwrite_5_4)=0.9  V(xmod0.xarray.iwrite_5_5)=0.9  V(xmod0.xarray.iwrite_5_6)=0.9  V(xmod0.xarray.iwrite_5_7)=0.9
+.ic V(xmod0.xarray.iwrite_5_8)=0.9  V(xmod0.xarray.iwrite_5_9)=0.9  V(xmod0.xarray.iwrite_5_10)=0.9  V(xmod0.xarray.iwrite_5_11)=0.9  V(xmod0.xarray.iwrite_5_12)=0.9  V(xmod0.xarray.iwrite_5_13)=0.9  V(xmod0.xarray.iwrite_5_14)=0.9  V(xmod0.xarray.iwrite_5_15)=0.9
+.ic V(xmod0.xarray.iwrite_5_16)=0.9  V(xmod0.xarray.iwrite_5_17)=0.9  V(xmod0.xarray.iwrite_5_18)=0.9  V(xmod0.xarray.iwrite_5_19)=0.9  V(xmod0.xarray.iwrite_5_20)=0.9  V(xmod0.xarray.iwrite_5_21)=0.9  V(xmod0.xarray.iwrite_5_22)=0.9  V(xmod0.xarray.iwrite_5_23)=0.9
+.ic V(xmod0.xarray.iwrite_5_24)=0.9  V(xmod0.xarray.iwrite_5_25)=0.9  V(xmod0.xarray.iwrite_5_26)=0.9  V(xmod0.xarray.iwrite_5_27)=0.9  V(xmod0.xarray.iwrite_5_28)=0.9  V(xmod0.xarray.iwrite_5_29)=0.9  V(xmod0.xarray.iwrite_5_30)=0.9  V(xmod0.xarray.iwrite_5_31)=0.9
+.ic V(xmod0.xarray.iwrite_6_0)=0.9  V(xmod0.xarray.iwrite_6_1)=0.9  V(xmod0.xarray.iwrite_6_2)=0.9  V(xmod0.xarray.iwrite_6_3)=0.9  V(xmod0.xarray.iwrite_6_4)=0.9  V(xmod0.xarray.iwrite_6_5)=0.9  V(xmod0.xarray.iwrite_6_6)=0.9  V(xmod0.xarray.iwrite_6_7)=0.9
+.ic V(xmod0.xarray.iwrite_6_8)=0.9  V(xmod0.xarray.iwrite_6_9)=0.9  V(xmod0.xarray.iwrite_6_10)=0.9  V(xmod0.xarray.iwrite_6_11)=0.9  V(xmod0.xarray.iwrite_6_12)=0.9  V(xmod0.xarray.iwrite_6_13)=0.9  V(xmod0.xarray.iwrite_6_14)=0.9  V(xmod0.xarray.iwrite_6_15)=0.9
+.ic V(xmod0.xarray.iwrite_6_16)=0.9  V(xmod0.xarray.iwrite_6_17)=0.9  V(xmod0.xarray.iwrite_6_18)=0.9  V(xmod0.xarray.iwrite_6_19)=0.9  V(xmod0.xarray.iwrite_6_20)=0.9  V(xmod0.xarray.iwrite_6_21)=0.9  V(xmod0.xarray.iwrite_6_22)=0.9  V(xmod0.xarray.iwrite_6_23)=0.9
+.ic V(xmod0.xarray.iwrite_6_24)=0.9  V(xmod0.xarray.iwrite_6_25)=0.9  V(xmod0.xarray.iwrite_6_26)=0.9  V(xmod0.xarray.iwrite_6_27)=0.9  V(xmod0.xarray.iwrite_6_28)=0.9  V(xmod0.xarray.iwrite_6_29)=0.9  V(xmod0.xarray.iwrite_6_30)=0.9  V(xmod0.xarray.iwrite_6_31)=0.9
+.ic V(xmod0.xarray.iwrite_7_0)=0.9  V(xmod0.xarray.iwrite_7_1)=0.9  V(xmod0.xarray.iwrite_7_2)=0.9  V(xmod0.xarray.iwrite_7_3)=0.9  V(xmod0.xarray.iwrite_7_4)=0.9  V(xmod0.xarray.iwrite_7_5)=0.9  V(xmod0.xarray.iwrite_7_6)=0.9  V(xmod0.xarray.iwrite_7_7)=0.9
+.ic V(xmod0.xarray.iwrite_7_8)=0.9  V(xmod0.xarray.iwrite_7_9)=0.9  V(xmod0.xarray.iwrite_7_10)=0.9  V(xmod0.xarray.iwrite_7_11)=0.9  V(xmod0.xarray.iwrite_7_12)=0.9  V(xmod0.xarray.iwrite_7_13)=0.9  V(xmod0.xarray.iwrite_7_14)=0.9  V(xmod0.xarray.iwrite_7_15)=0.9
+.ic V(xmod0.xarray.iwrite_7_16)=0.9  V(xmod0.xarray.iwrite_7_17)=0.9  V(xmod0.xarray.iwrite_7_18)=0.9  V(xmod0.xarray.iwrite_7_19)=0.9  V(xmod0.xarray.iwrite_7_20)=0.9  V(xmod0.xarray.iwrite_7_21)=0.9  V(xmod0.xarray.iwrite_7_22)=0.9  V(xmod0.xarray.iwrite_7_23)=0.9
+.ic V(xmod0.xarray.iwrite_7_24)=0.9  V(xmod0.xarray.iwrite_7_25)=0.9  V(xmod0.xarray.iwrite_7_26)=0.9  V(xmod0.xarray.iwrite_7_27)=0.9  V(xmod0.xarray.iwrite_7_28)=0.9  V(xmod0.xarray.iwrite_7_29)=0.9  V(xmod0.xarray.iwrite_7_30)=0.9  V(xmod0.xarray.iwrite_7_31)=0.9
+.ic V(xmod0.xarray.iwrite_8_0)=0.9  V(xmod0.xarray.iwrite_8_1)=0.9  V(xmod0.xarray.iwrite_8_2)=0.9  V(xmod0.xarray.iwrite_8_3)=0.9  V(xmod0.xarray.iwrite_8_4)=0.9  V(xmod0.xarray.iwrite_8_5)=0.9  V(xmod0.xarray.iwrite_8_6)=0.9  V(xmod0.xarray.iwrite_8_7)=0.9
+.ic V(xmod0.xarray.iwrite_8_8)=0.9  V(xmod0.xarray.iwrite_8_9)=0.9  V(xmod0.xarray.iwrite_8_10)=0.9  V(xmod0.xarray.iwrite_8_11)=0.9  V(xmod0.xarray.iwrite_8_12)=0.9  V(xmod0.xarray.iwrite_8_13)=0.9  V(xmod0.xarray.iwrite_8_14)=0.9  V(xmod0.xarray.iwrite_8_15)=0.9
+.ic V(xmod0.xarray.iwrite_8_16)=0.9  V(xmod0.xarray.iwrite_8_17)=0.9  V(xmod0.xarray.iwrite_8_18)=0.9  V(xmod0.xarray.iwrite_8_19)=0.9  V(xmod0.xarray.iwrite_8_20)=0.9  V(xmod0.xarray.iwrite_8_21)=0.9  V(xmod0.xarray.iwrite_8_22)=0.9  V(xmod0.xarray.iwrite_8_23)=0.9
+.ic V(xmod0.xarray.iwrite_8_24)=0.9  V(xmod0.xarray.iwrite_8_25)=0.9  V(xmod0.xarray.iwrite_8_26)=0.9  V(xmod0.xarray.iwrite_8_27)=0.9  V(xmod0.xarray.iwrite_8_28)=0.9  V(xmod0.xarray.iwrite_8_29)=0.9  V(xmod0.xarray.iwrite_8_30)=0.9  V(xmod0.xarray.iwrite_8_31)=0.9
+.ic V(xmod0.xarray.iwrite_9_0)=0.9  V(xmod0.xarray.iwrite_9_1)=0.9  V(xmod0.xarray.iwrite_9_2)=0.9  V(xmod0.xarray.iwrite_9_3)=0.9  V(xmod0.xarray.iwrite_9_4)=0.9  V(xmod0.xarray.iwrite_9_5)=0.9  V(xmod0.xarray.iwrite_9_6)=0.9  V(xmod0.xarray.iwrite_9_7)=0.9
+.ic V(xmod0.xarray.iwrite_9_8)=0.9  V(xmod0.xarray.iwrite_9_9)=0.9  V(xmod0.xarray.iwrite_9_10)=0.9  V(xmod0.xarray.iwrite_9_11)=0.9  V(xmod0.xarray.iwrite_9_12)=0.9  V(xmod0.xarray.iwrite_9_13)=0.9  V(xmod0.xarray.iwrite_9_14)=0.9  V(xmod0.xarray.iwrite_9_15)=0.9
+.ic V(xmod0.xarray.iwrite_9_16)=0.9  V(xmod0.xarray.iwrite_9_17)=0.9  V(xmod0.xarray.iwrite_9_18)=0.9  V(xmod0.xarray.iwrite_9_19)=0.9  V(xmod0.xarray.iwrite_9_20)=0.9  V(xmod0.xarray.iwrite_9_21)=0.9  V(xmod0.xarray.iwrite_9_22)=0.9  V(xmod0.xarray.iwrite_9_23)=0.9
+.ic V(xmod0.xarray.iwrite_9_24)=0.9  V(xmod0.xarray.iwrite_9_25)=0.9  V(xmod0.xarray.iwrite_9_26)=0.9  V(xmod0.xarray.iwrite_9_27)=0.9  V(xmod0.xarray.iwrite_9_28)=0.9  V(xmod0.xarray.iwrite_9_29)=0.9  V(xmod0.xarray.iwrite_9_30)=0.9  V(xmod0.xarray.iwrite_9_31)=0.9
+.ic V(xmod0.xarray.iwrite_10_0)=0.9  V(xmod0.xarray.iwrite_10_1)=0.9  V(xmod0.xarray.iwrite_10_2)=0.9  V(xmod0.xarray.iwrite_10_3)=0.9  V(xmod0.xarray.iwrite_10_4)=0.9  V(xmod0.xarray.iwrite_10_5)=0.9  V(xmod0.xarray.iwrite_10_6)=0.9  V(xmod0.xarray.iwrite_10_7)=0.9
+.ic V(xmod0.xarray.iwrite_10_8)=0.9  V(xmod0.xarray.iwrite_10_9)=0.9  V(xmod0.xarray.iwrite_10_10)=0.9  V(xmod0.xarray.iwrite_10_11)=0.9  V(xmod0.xarray.iwrite_10_12)=0.9  V(xmod0.xarray.iwrite_10_13)=0.9  V(xmod0.xarray.iwrite_10_14)=0.9  V(xmod0.xarray.iwrite_10_15)=0.9
+.ic V(xmod0.xarray.iwrite_10_16)=0.9  V(xmod0.xarray.iwrite_10_17)=0.9  V(xmod0.xarray.iwrite_10_18)=0.9  V(xmod0.xarray.iwrite_10_19)=0.9  V(xmod0.xarray.iwrite_10_20)=0.9  V(xmod0.xarray.iwrite_10_21)=0.9  V(xmod0.xarray.iwrite_10_22)=0.9  V(xmod0.xarray.iwrite_10_23)=0.9
+.ic V(xmod0.xarray.iwrite_10_24)=0.9  V(xmod0.xarray.iwrite_10_25)=0.9  V(xmod0.xarray.iwrite_10_26)=0.9  V(xmod0.xarray.iwrite_10_27)=0.9  V(xmod0.xarray.iwrite_10_28)=0.9  V(xmod0.xarray.iwrite_10_29)=0.9  V(xmod0.xarray.iwrite_10_30)=0.9  V(xmod0.xarray.iwrite_10_31)=0.9
+.ic V(xmod0.xarray.iwrite_11_0)=0.9  V(xmod0.xarray.iwrite_11_1)=0.9  V(xmod0.xarray.iwrite_11_2)=0.9  V(xmod0.xarray.iwrite_11_3)=0.9  V(xmod0.xarray.iwrite_11_4)=0.9  V(xmod0.xarray.iwrite_11_5)=0.9  V(xmod0.xarray.iwrite_11_6)=0.9  V(xmod0.xarray.iwrite_11_7)=0.9
+.ic V(xmod0.xarray.iwrite_11_8)=0.9  V(xmod0.xarray.iwrite_11_9)=0.9  V(xmod0.xarray.iwrite_11_10)=0.9  V(xmod0.xarray.iwrite_11_11)=0.9  V(xmod0.xarray.iwrite_11_12)=0.9  V(xmod0.xarray.iwrite_11_13)=0.9  V(xmod0.xarray.iwrite_11_14)=0.9  V(xmod0.xarray.iwrite_11_15)=0.9
+.ic V(xmod0.xarray.iwrite_11_16)=0.9  V(xmod0.xarray.iwrite_11_17)=0.9  V(xmod0.xarray.iwrite_11_18)=0.9  V(xmod0.xarray.iwrite_11_19)=0.9  V(xmod0.xarray.iwrite_11_20)=0.9  V(xmod0.xarray.iwrite_11_21)=0.9  V(xmod0.xarray.iwrite_11_22)=0.9  V(xmod0.xarray.iwrite_11_23)=0.9
+.ic V(xmod0.xarray.iwrite_11_24)=0.9  V(xmod0.xarray.iwrite_11_25)=0.9  V(xmod0.xarray.iwrite_11_26)=0.9  V(xmod0.xarray.iwrite_11_27)=0.9  V(xmod0.xarray.iwrite_11_28)=0.9  V(xmod0.xarray.iwrite_11_29)=0.9  V(xmod0.xarray.iwrite_11_30)=0.9  V(xmod0.xarray.iwrite_11_31)=0.9
+.ic V(xmod0.xarray.iwrite_12_0)=0.9  V(xmod0.xarray.iwrite_12_1)=0.9  V(xmod0.xarray.iwrite_12_2)=0.9  V(xmod0.xarray.iwrite_12_3)=0.9  V(xmod0.xarray.iwrite_12_4)=0.9  V(xmod0.xarray.iwrite_12_5)=0.9  V(xmod0.xarray.iwrite_12_6)=0.9  V(xmod0.xarray.iwrite_12_7)=0.9
+.ic V(xmod0.xarray.iwrite_12_8)=0.9  V(xmod0.xarray.iwrite_12_9)=0.9  V(xmod0.xarray.iwrite_12_10)=0.9  V(xmod0.xarray.iwrite_12_11)=0.9  V(xmod0.xarray.iwrite_12_12)=0.9  V(xmod0.xarray.iwrite_12_13)=0.9  V(xmod0.xarray.iwrite_12_14)=0.9  V(xmod0.xarray.iwrite_12_15)=0.9
+.ic V(xmod0.xarray.iwrite_12_16)=0.9  V(xmod0.xarray.iwrite_12_17)=0.9  V(xmod0.xarray.iwrite_12_18)=0.9  V(xmod0.xarray.iwrite_12_19)=0.9  V(xmod0.xarray.iwrite_12_20)=0.9  V(xmod0.xarray.iwrite_12_21)=0.9  V(xmod0.xarray.iwrite_12_22)=0.9  V(xmod0.xarray.iwrite_12_23)=0.9
+.ic V(xmod0.xarray.iwrite_12_24)=0.9  V(xmod0.xarray.iwrite_12_25)=0.9  V(xmod0.xarray.iwrite_12_26)=0.9  V(xmod0.xarray.iwrite_12_27)=0.9  V(xmod0.xarray.iwrite_12_28)=0.9  V(xmod0.xarray.iwrite_12_29)=0.9  V(xmod0.xarray.iwrite_12_30)=0.9  V(xmod0.xarray.iwrite_12_31)=0.9
+.ic V(xmod0.xarray.iwrite_13_0)=0.9  V(xmod0.xarray.iwrite_13_1)=0.9  V(xmod0.xarray.iwrite_13_2)=0.9  V(xmod0.xarray.iwrite_13_3)=0.9  V(xmod0.xarray.iwrite_13_4)=0.9  V(xmod0.xarray.iwrite_13_5)=0.9  V(xmod0.xarray.iwrite_13_6)=0.9  V(xmod0.xarray.iwrite_13_7)=0.9
+.ic V(xmod0.xarray.iwrite_13_8)=0.9  V(xmod0.xarray.iwrite_13_9)=0.9  V(xmod0.xarray.iwrite_13_10)=0.9  V(xmod0.xarray.iwrite_13_11)=0.9  V(xmod0.xarray.iwrite_13_12)=0.9  V(xmod0.xarray.iwrite_13_13)=0.9  V(xmod0.xarray.iwrite_13_14)=0.9  V(xmod0.xarray.iwrite_13_15)=0.9
+.ic V(xmod0.xarray.iwrite_13_16)=0.9  V(xmod0.xarray.iwrite_13_17)=0.9  V(xmod0.xarray.iwrite_13_18)=0.9  V(xmod0.xarray.iwrite_13_19)=0.9  V(xmod0.xarray.iwrite_13_20)=0.9  V(xmod0.xarray.iwrite_13_21)=0.9  V(xmod0.xarray.iwrite_13_22)=0.9  V(xmod0.xarray.iwrite_13_23)=0.9
+.ic V(xmod0.xarray.iwrite_13_24)=0.9  V(xmod0.xarray.iwrite_13_25)=0.9  V(xmod0.xarray.iwrite_13_26)=0.9  V(xmod0.xarray.iwrite_13_27)=0.9  V(xmod0.xarray.iwrite_13_28)=0.9  V(xmod0.xarray.iwrite_13_29)=0.9  V(xmod0.xarray.iwrite_13_30)=0.9  V(xmod0.xarray.iwrite_13_31)=0.9
+.ic V(xmod0.xarray.iwrite_14_0)=0.9  V(xmod0.xarray.iwrite_14_1)=0.9  V(xmod0.xarray.iwrite_14_2)=0.9  V(xmod0.xarray.iwrite_14_3)=0.9  V(xmod0.xarray.iwrite_14_4)=0.9  V(xmod0.xarray.iwrite_14_5)=0.9  V(xmod0.xarray.iwrite_14_6)=0.9  V(xmod0.xarray.iwrite_14_7)=0.9
+.ic V(xmod0.xarray.iwrite_14_8)=0.9  V(xmod0.xarray.iwrite_14_9)=0.9  V(xmod0.xarray.iwrite_14_10)=0.9  V(xmod0.xarray.iwrite_14_11)=0.9  V(xmod0.xarray.iwrite_14_12)=0.9  V(xmod0.xarray.iwrite_14_13)=0.9  V(xmod0.xarray.iwrite_14_14)=0.9  V(xmod0.xarray.iwrite_14_15)=0.9
+.ic V(xmod0.xarray.iwrite_14_16)=0.9  V(xmod0.xarray.iwrite_14_17)=0.9  V(xmod0.xarray.iwrite_14_18)=0.9  V(xmod0.xarray.iwrite_14_19)=0.9  V(xmod0.xarray.iwrite_14_20)=0.9  V(xmod0.xarray.iwrite_14_21)=0.9  V(xmod0.xarray.iwrite_14_22)=0.9  V(xmod0.xarray.iwrite_14_23)=0.9
+.ic V(xmod0.xarray.iwrite_14_24)=0.9  V(xmod0.xarray.iwrite_14_25)=0.9  V(xmod0.xarray.iwrite_14_26)=0.9  V(xmod0.xarray.iwrite_14_27)=0.9  V(xmod0.xarray.iwrite_14_28)=0.9  V(xmod0.xarray.iwrite_14_29)=0.9  V(xmod0.xarray.iwrite_14_30)=0.9  V(xmod0.xarray.iwrite_14_31)=0.9
+.ic V(xmod0.xarray.iwrite_15_0)=0.9  V(xmod0.xarray.iwrite_15_1)=0.9  V(xmod0.xarray.iwrite_15_2)=0.9  V(xmod0.xarray.iwrite_15_3)=0.9  V(xmod0.xarray.iwrite_15_4)=0.9  V(xmod0.xarray.iwrite_15_5)=0.9  V(xmod0.xarray.iwrite_15_6)=0.9  V(xmod0.xarray.iwrite_15_7)=0.9
+.ic V(xmod0.xarray.iwrite_15_8)=0.9  V(xmod0.xarray.iwrite_15_9)=0.9  V(xmod0.xarray.iwrite_15_10)=0.9  V(xmod0.xarray.iwrite_15_11)=0.9  V(xmod0.xarray.iwrite_15_12)=0.9  V(xmod0.xarray.iwrite_15_13)=0.9  V(xmod0.xarray.iwrite_15_14)=0.9  V(xmod0.xarray.iwrite_15_15)=0.9
+.ic V(xmod0.xarray.iwrite_15_16)=0.9  V(xmod0.xarray.iwrite_15_17)=0.9  V(xmod0.xarray.iwrite_15_18)=0.9  V(xmod0.xarray.iwrite_15_19)=0.9  V(xmod0.xarray.iwrite_15_20)=0.9  V(xmod0.xarray.iwrite_15_21)=0.9  V(xmod0.xarray.iwrite_15_22)=0.9  V(xmod0.xarray.iwrite_15_23)=0.9
+.ic V(xmod0.xarray.iwrite_15_24)=0.9  V(xmod0.xarray.iwrite_15_25)=0.9  V(xmod0.xarray.iwrite_15_26)=0.9  V(xmod0.xarray.iwrite_15_27)=0.9  V(xmod0.xarray.iwrite_15_28)=0.9  V(xmod0.xarray.iwrite_15_29)=0.9  V(xmod0.xarray.iwrite_15_30)=0.9  V(xmod0.xarray.iwrite_15_31)=0.9
+
+* ── Routing weight pre-initialization ────────────────────────────────────────
+* vw_route_0_0=0.75V → XMPRED_r_0_0 (W=4/L=0.35) sinks ~28µA from i_pred_0
+* This exceeds prediction sources (~10.7µA) → V(i_pred_0) drops → ierr_dig_0=HIGH
+* WE_route pulse fires Hebbian: v_pre=sf_out_0≈1.14V (PMOS SF §71; was 0.29V with NMOS SF)
+* LTD decreases vw_route_0_0 — correct adaptive response (suppresses over-prediction)
+.ic V(xlink.vw_route_0_0)=0.75
+
+* ── mod0: lower module (pcn_module_16x32) ───────────────────────────────────
+* SPICE convention: subcircuit name goes LAST on the final + continuation line
+Xmod0
++ m0_inp0  m0_inn0 m0_inp1  m0_inn1 m0_inp2  m0_inn2 m0_inp3  m0_inn3 m0_inp4  m0_inn4 m0_inp5  m0_inn5 m0_inp6  m0_inn6 m0_inp7  m0_inn7 m0_inp8  m0_inn8 m0_inp9  m0_inn9 m0_inp10  m0_inn10 m0_inp11  m0_inn11 m0_inp12  m0_inn12 m0_inp13  m0_inn13 m0_inp14  m0_inn14 m0_inp15  m0_inn15
++ m0_inp16  m0_inn16 m0_inp17  m0_inn17 m0_inp18  m0_inn18 m0_inp19  m0_inn19 m0_inp20  m0_inn20 m0_inp21  m0_inn21 m0_inp22  m0_inn22 m0_inp23  m0_inn23 m0_inp24  m0_inn24 m0_inp25  m0_inn25 m0_inp26  m0_inn26 m0_inp27  m0_inn27 m0_inp28  m0_inn28 m0_inp29  m0_inn29 m0_inp30  m0_inn30 m0_inp31  m0_inn31
++ m0_iout_0 m0_iout_1 m0_iout_2 m0_iout_3 m0_iout_4 m0_iout_5 m0_iout_6 m0_iout_7 m0_iout_8 m0_iout_9 m0_iout_10 m0_iout_11 m0_iout_12 m0_iout_13 m0_iout_14 m0_iout_15
++ m0_ipred_0 m0_ipred_1 m0_ipred_2 m0_ipred_3 m0_ipred_4 m0_ipred_5 m0_ipred_6 m0_ipred_7 m0_ipred_8 m0_ipred_9 m0_ipred_10 m0_ipred_11 m0_ipred_12 m0_ipred_13 m0_ipred_14 m0_ipred_15
++ m0_ierr_0 m0_ierr_1 m0_ierr_2 m0_ierr_3 m0_ierr_4 m0_ierr_5 m0_ierr_6 m0_ierr_7 m0_ierr_8 m0_ierr_9 m0_ierr_10 m0_ierr_11 m0_ierr_12 m0_ierr_13 m0_ierr_14 m0_ierr_15
++ vss vss vss vss  vss vss vss vss  vss vss vss vss  vss vss vss vss
++ vpi vpi vpi vpi  vpi vpi vpi vpi  vpi vpi vpi vpi  vpi vpi vpi vpi
++ vbias_p  vbias_n  vcm  vdd  vss
++ pcn_module_16x32
+
+* ── layer_link_route_16 ──────────────────────────────────────────────────────
+* iout_upper: vss (no upper module; only one-layer routing test)
+* sf_out_r:   ascending SF output test nodes
+Xlink
++ m0_iout_0 m0_iout_1 m0_iout_2 m0_iout_3 m0_iout_4 m0_iout_5 m0_iout_6 m0_iout_7 m0_iout_8 m0_iout_9 m0_iout_10 m0_iout_11 m0_iout_12 m0_iout_13 m0_iout_14 m0_iout_15
++ sf_out_0 sf_out_1 sf_out_2 sf_out_3 sf_out_4 sf_out_5 sf_out_6 sf_out_7 sf_out_8 sf_out_9 sf_out_10 sf_out_11 sf_out_12 sf_out_13 sf_out_14 sf_out_15
++ m0_ipred_0 m0_ipred_1 m0_ipred_2 m0_ipred_3 m0_ipred_4 m0_ipred_5 m0_ipred_6 m0_ipred_7 m0_ipred_8 m0_ipred_9 m0_ipred_10 m0_ipred_11 m0_ipred_12 m0_ipred_13 m0_ipred_14 m0_ipred_15
++ vss vss vss vss  vss vss vss vss  vss vss vss vss  vss vss vss vss
++ m0_ierr_0 m0_ierr_1 m0_ierr_2 m0_ierr_3 m0_ierr_4 m0_ierr_5 m0_ierr_6 m0_ierr_7 m0_ierr_8 m0_ierr_9 m0_ierr_10 m0_ierr_11 m0_ierr_12 m0_ierr_13 m0_ierr_14 m0_ierr_15
++ we_route
++ vcm_route  nvcm_upper  ncm_iout  vbias_n  vdd  vss
++ layer_link_route_16
+
+* ── Nodesets ────────────────────────────────────────────────────────────────
+* iout balanced OP: ~0.47V (PMOS mirror fix §70; current_sub XMPS1 loads below Vcm)
+* PMOS SF output: iout_balance + |Vgs_P| ≈ 0.47 + 0.67 = 1.14V (§71)
+.nodeset V(m0_iout_0)=0.47  V(m0_iout_1)=0.47
+.nodeset V(nvcm_upper)=1.14
+.nodeset V(sf_out_0)=1.14
+
+.control
+  set filetype = ascii
+
+  echo ""
+  echo "======================================================="
+  echo " PCN 16x32 routing test — 400ns tran"
+  echo "======================================================="
+
+  tran 0.5n 400n uic
+
+  * T1: pre-pulse state at t=45ns (vw_route[0][0]=0.75V pre-set; before first WE_route)
+  echo ""
+  echo " T1 — pre-pulse (t=45ns, vw_route[0][0]=0.75V pre-set):"
+  meas tran T1_iout0   FIND V(m0_iout_0)            AT=45n
+  meas tran T1_iout1   FIND V(m0_iout_1)            AT=45n
+  meas tran T1_sf0     FIND V(sf_out_0)             AT=45n
+  meas tran T1_ierr0   FIND V(m0_ierr_0)            AT=45n
+  meas tran T1_ipred0  FIND V(m0_ipred_0)           AT=45n
+  meas tran T1_vw00    FIND V(xlink.vw_route_0_0)   AT=45n
+
+  echo "   V(m0_iout_0)            = " $&T1_iout0   " V  (active row; ~1.03V expected)"
+  echo "   V(m0_iout_1)            = " $&T1_iout1   " V  (balanced row; ~1.03V)"
+  echo "   V(sf_out_0)             = " $&T1_sf0     " V  (PMOS SF output; expect ~1.14V)"
+  echo "   V(m0_ierr_0)            = " $&T1_ierr0   " V  (error flag; expect HIGH=1.8V: over-prediction)"
+  echo "   V(m0_ipred_0)           = " $&T1_ipred0  " V  (prediction; LOW: XMPRED_r sinking)"
+  echo "   V(xlink.vw_route_0_0)   = " $&T1_vw00    " V  (routing weight; expect ~0.75V pre-set)"
+
+  * T3: Hebbian write pulses — first pulse at t=50ns; expect LTD (weight decreases)
+  echo ""
+  echo " T3 — Hebbian LTD write (WE_route pulses at t=50,100,150... ns):"
+  meas tran T3_we_mid    FIND V(we_route)            AT=52n
+  meas tran T3_ierr_mid  FIND V(m0_ierr_0)           AT=52n
+  meas tran T3_vw_p1     FIND V(xlink.vw_route_0_0)  AT=70n
+  meas tran T3_vw_p2     FIND V(xlink.vw_route_0_0)  AT=120n
+  meas tran T3_vw_p3     FIND V(xlink.vw_route_0_0)  AT=170n
+
+  echo "   V(we_route)    t=52ns   = " $&T3_we_mid    " V  (expect 1.8V during pulse)"
+  echo "   V(m0_ierr_0)   t=52ns   = " $&T3_ierr_mid  " V  (expect HIGH=1.8V: enables Hebbian write)"
+  echo "   Vw_route[0][0] after p1 (t=70ns)  = " $&T3_vw_p1  " V  (expect < 0.75V: LTD)"
+  echo "   Vw_route[0][0] after p2 (t=120ns) = " $&T3_vw_p2  " V"
+  echo "   Vw_route[0][0] after p3 (t=170ns) = " $&T3_vw_p3  " V"
+
+  if T3_vw_p1 < T1_vw00
+    echo "   PASS: routing weight DECREASED after pulse 1 (LTD confirmed — correct adaptive response)"
+  else
+    echo "   NOTE: routing weight did not decrease — check ierr_dig level and Hebbian write path"
+  end
+
+  * T2: trained state at t=380ns (after 7 LTD pulses from vw_route[0][0]=0.75V)
+  echo ""
+  echo " T2 — trained state (t=380ns, 7 LTD write pulses applied):"
+  meas tran T2_iout0   FIND V(m0_iout_0)            AT=380n
+  meas tran T2_sf0     FIND V(sf_out_0)             AT=380n
+  meas tran T2_ierr0   FIND V(m0_ierr_0)            AT=380n
+  meas tran T2_ipred0  FIND V(m0_ipred_0)           AT=380n
+  meas tran T2_vw00    FIND V(xlink.vw_route_0_0)   AT=380n
+
+  echo "   V(m0_iout_0)            = " $&T2_iout0   " V"
+  echo "   V(sf_out_0)             = " $&T2_sf0     " V"
+  echo "   V(m0_ierr_0)            = " $&T2_ierr0   " V  (should approach LOW as weight corrects over-prediction)"
+  echo "   V(m0_ipred_0)           = " $&T2_ipred0  " V  (prediction sinking reduces as weight drops)"
+  echo "   V(xlink.vw_route_0_0)   = " $&T2_vw00    " V  (expect < 0.75V after LTD accumulation)"
+
+  echo ""
+  echo " Weight trajectory (LTD from 0.75V):"
+  echo "   0.75V → p1: " $&T3_vw_p1 " V → p2: " $&T3_vw_p2 " V → p3: " $&T3_vw_p3 " V → t=380ns: " $&T2_vw00 " V"
+
+  wrdata output/t1_t2_t3_route.csv V(xlink.vw_route_0_0) V(m0_ierr_0) V(m0_iout_0) V(m0_iout_1) V(sf_out_0) V(m0_ipred_0) V(we_route)
+  echo ""
+  echo " Saved: output/t1_t2_t3_route.csv"
+.endc
+
+.end

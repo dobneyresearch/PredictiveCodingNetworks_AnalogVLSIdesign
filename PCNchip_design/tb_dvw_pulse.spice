@@ -1,0 +1,224 @@
+* =============================================================================
+* tb_dvw_pulse.spice — Per-pulse ΔVw characterization
+* File:      tb_dvw_pulse.spice
+* Simulator: ngspice 42+
+* Run via:   ./run_sim.sh --netlist tb_dvw_pulse.spice
+*
+* Purpose: Measure ΔVw per Hebbian WE pulse under realistic conditions.
+*
+*   Design target (operational): Ihebb=28nA, t_pulse=50µs → ΔVw ≈ 1 DAC LSB = 5mV
+*   SPICE test condition:        Ihebb (MN7 W=1/L=1 at v_post=1.8V) ≈ µA range
+*                                t_pulse = 5ns → expected ΔVw in mV range
+*
+* Tests:
+*   P1: Single-pulse ΔVw — 5ns WE pulse, inp=1.0V (+100mV above Vcm)
+*       Weights init at 0.75V via .ic; measure before (t=40ns) and after (t=100ns).
+*
+*   P2: Multi-pulse convergence — 10× 5ns pulses at 20ns intervals
+*       Starting from 0.75V, track weight evolution per pulse.
+*
+* Circuit: single mod0 (pcn_module_4x4), no layer link, no mod1.
+*          i_pred = VSS for all rows (unsupervised mode, ierr_dig=HIGH).
+*          inp_col_0 = 1.0V (differential), col_1..3 = 0.9V (balanced).
+*
+* .ic vs .nodeset:
+*   .nodeset  — convergence hint for op only; tran ignores it.
+*   .ic       — forces node value at t=0 of EVERY tran analysis.
+*   Using .ic for all weight and iwrite nodes so tran starts at 0.75V weights.
+*   .nodeset kept for non-capacitor nodes (KCL bus, error nodes) to seed op.
+* =============================================================================
+
+.title PCN per-pulse dVw characterization
+
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+.include "pcn_mac_cell.spice"
+.include "pcn_array_4x4.spice"
+.include "pcn_module_4x4.spice"
+
+* ── Simulation options ────────────────────────────────────────────────────────
+.options RELTOL=1e-3 ABSTOL=1e-12 VNTOL=1e-6 GMIN=1e-10
+
+* ── Supplies and bias rails ───────────────────────────────────────────────────
+Vdd     vdd      0   DC 1.8
+Vcm     vcm      0   DC 0.9
+Vbn     vbias_n  0   DC 0.760
+Vbp     vbias_p  0   DC 1.2
+Vpi     vpi      0   DC 0.65
+
+* ── Column inputs ─────────────────────────────────────────────────────────────
+* col0: elevated to 1.0V (+100mV above Vcm) to drive positive differential → LTP
+* col1..3: balanced at Vcm throughout
+Vinp0  m0_inp0  0  DC 1.0
+Vinp1  m0_inp1  0  DC 0.9
+Vinp2  m0_inp2  0  DC 0.9
+Vinp3  m0_inp3  0  DC 0.9
+
+* ── Write-enable (P1: single 5ns pulse starting at t=50ns) ───────────────────
+* For P2 multi-pulse: period=20n, 10 pulses → final edge at 50n + 10×20n = 250n
+Vwe0  m0_we0  0  PULSE(0 1.8 50n 1n 1n 5n 20n)
+Vwe1  m0_we1  0  DC 0
+Vwe2  m0_we2  0  DC 0
+Vwe3  m0_we3  0  DC 0
+
+* ── Module 0 ──────────────────────────────────────────────────────────────────
+* i_pred = VSS (unsupervised): ierr_dig=HIGH, Hebbian writes enabled
+Xmod0
++ m0_inp0  vcm  m0_inp1  vcm  m0_inp2  vcm  m0_inp3  vcm
++ m0_iout0  m0_iout1  m0_iout2  m0_iout3
++ 0  0  0  0
++ m0_err0  m0_err1  m0_err2  m0_err3
++ m0_we0  m0_we1  m0_we2  m0_we3
++ vpi  vpi  vpi  vpi
++ vbias_p  vbias_n  vcm  vdd  0
++ pcn_module_4x4
+
+* ── .nodeset: convergence seeds for op ───────────────────────────────────────
+.nodeset V(m0_iout0)=1.23  V(m0_iout1)=1.23  V(m0_iout2)=1.23  V(m0_iout3)=1.23
+.nodeset V(xmod0.i_err_0)=0.0  V(xmod0.i_err_1)=0.0
+.nodeset V(xmod0.i_err_2)=0.0  V(xmod0.i_err_3)=0.0
+
+* ── .ic: initial conditions for tran — weights at 0.75V ──────────────────────
+* All weight capacitors (Cw) forced to 0.75V at t=0 of each tran.
+* iwrite nodes initialised to 0.9V (Vcm) as floating-node seed.
+.ic V(xmod0.xarray.vw_0_0)=0.75  V(xmod0.xarray.vw_0_1)=0.75
+.ic V(xmod0.xarray.vw_0_2)=0.75  V(xmod0.xarray.vw_0_3)=0.75
+.ic V(xmod0.xarray.vw_1_0)=0.75  V(xmod0.xarray.vw_1_1)=0.75
+.ic V(xmod0.xarray.vw_1_2)=0.75  V(xmod0.xarray.vw_1_3)=0.75
+.ic V(xmod0.xarray.vw_2_0)=0.75  V(xmod0.xarray.vw_2_1)=0.75
+.ic V(xmod0.xarray.vw_2_2)=0.75  V(xmod0.xarray.vw_2_3)=0.75
+.ic V(xmod0.xarray.vw_3_0)=0.75  V(xmod0.xarray.vw_3_1)=0.75
+.ic V(xmod0.xarray.vw_3_2)=0.75  V(xmod0.xarray.vw_3_3)=0.75
+.ic V(xmod0.xarray.iwrite_0_0)=0.9  V(xmod0.xarray.iwrite_0_1)=0.9
+.ic V(xmod0.xarray.iwrite_0_2)=0.9  V(xmod0.xarray.iwrite_0_3)=0.9
+.ic V(xmod0.xarray.iwrite_1_0)=0.9  V(xmod0.xarray.iwrite_1_1)=0.9
+.ic V(xmod0.xarray.iwrite_1_2)=0.9  V(xmod0.xarray.iwrite_1_3)=0.9
+.ic V(xmod0.xarray.iwrite_2_0)=0.9  V(xmod0.xarray.iwrite_2_1)=0.9
+.ic V(xmod0.xarray.iwrite_2_2)=0.9  V(xmod0.xarray.iwrite_2_3)=0.9
+.ic V(xmod0.xarray.iwrite_3_0)=0.9  V(xmod0.xarray.iwrite_3_1)=0.9
+.ic V(xmod0.xarray.iwrite_3_2)=0.9  V(xmod0.xarray.iwrite_3_3)=0.9
+
+
+* =============================================================================
+.control
+
+  set filetype = ascii
+
+  * ──────────────────────────────────────────────────────────────────────────
+  * P1: Single-pulse ΔVw
+  * ──────────────────────────────────────────────────────────────────────────
+  echo ""
+  echo "======================================================"
+  echo " P1: Single 5ns WE pulse — ΔVw measurement"
+  echo "======================================================"
+  echo "  .ic weights = 0.75V; inp0 = 1.0V (+100mV above Vcm)"
+  echo "  WE pulse: 5ns at t=50ns; row0 only"
+  echo ""
+
+  * Run with UIC flag to apply .ic values instead of op-point initial values
+  tran 0.2n 120n uic
+
+  * Measure pre-pulse and post-pulse weight on write cell (row0, col0)
+  meas tran Vw_pre   FIND V(xmod0.xarray.vw_0_0) AT=40n
+  meas tran Vw_post  FIND V(xmod0.xarray.vw_0_0) AT=110n
+
+  * Cross-checks: confirm WE was high and ierr_dig was high during write window
+  meas tran Verr_t60 FIND V(m0_err0)              AT=60n
+  meas tran Vwe_t60  FIND V(m0_we0)               AT=60n
+  meas tran Viout    FIND V(m0_iout0)              AT=40n
+
+  * Bystander: row0 col1 (same WE row, different col, inp1=Vcm → no differential)
+  meas tran Vw_col1  FIND V(xmod0.xarray.vw_0_1)  AT=110n
+
+  * Bystander: row1 col0 (same col, different WE row, we1=0)
+  meas tran Vw_row1  FIND V(xmod0.xarray.vw_1_0)  AT=110n
+
+  echo "  V(m0_iout0) at t=40ns  = " $&Viout    " V  (KCL bus; expect ~1.3-1.4V with weights=0.75)"
+  echo "  V(m0_err0)  at t=60ns  = " $&Verr_t60 " V  (should be HIGH ~1.8V)"
+  echo "  V(m0_we0)   at t=60ns  = " $&Vwe_t60  " V  (should be 1.8V)"
+  echo ""
+  echo "  V(vw_0_0)   at t=40ns  = " $&Vw_pre   " V  (pre-pulse, after .ic settling)"
+  echo "  V(vw_0_0)   at t=110ns = " $&Vw_post  " V  (post-pulse)"
+
+  let dVw = Vw_post - Vw_pre
+  let dVw_mV = dVw * 1000
+  echo "  ΔVw (row0,col0)        = " $&dVw_mV  " mV"
+  echo ""
+  echo "  Bystander checks (should be ≈0.75V, no write):"
+  echo "  V(vw_0_1)   at t=110ns = " $&Vw_col1 " V  (row0,col1 — no differential at inp1)"
+  echo "  V(vw_1_0)   at t=110ns = " $&Vw_row1 " V  (row1,col0 — WE1=0 so no write)"
+
+  let dVw_abs = abs(dVw)
+  if dVw_abs > 0.001
+    echo "  PASS: weight changed by " $&dVw_mV " mV"
+  else
+    echo "  WARN: weight change < 1mV — write path may be inactive"
+  end
+
+  write output/p1_single.raw
+  wrdata output/p1_single.csv v(xmod0.xarray.vw_0_0) v(xmod0.xarray.vw_0_1) v(xmod0.xarray.vw_1_0) v(m0_err0) v(m0_we0) v(m0_iout0)
+  echo "  Saved: output/p1_single.raw  output/p1_single.csv"
+
+
+  * ──────────────────────────────────────────────────────────────────────────
+  * P2: Multi-pulse convergence (10 pulses, 20ns period)
+  * WE0 is already a repeating PULSE(period=20n); run 300ns to capture 10 pulses.
+  * Measure weight after each pulse via AT= at mid-points between pulses.
+  * ──────────────────────────────────────────────────────────────────────────
+  echo ""
+  echo "======================================================"
+  echo " P2: Multi-pulse convergence — 10 pulses × 5ns"
+  echo "======================================================"
+  echo "  Starting from .ic = 0.75V; inp0 = 1.0V; WE period = 20ns"
+  echo ""
+
+  tran 0.5n 300n uic
+
+  * Sample weight at mid-point of quiescent gap after each pulse
+  * Pulse n starts at 50+20*(n-1) ns; ends at 56+20*(n-1) ns;
+  * we sample at 65+20*(n-1) ns (9ns after pulse end, well settled).
+  meas tran Vw_p0  FIND V(xmod0.xarray.vw_0_0) AT=40n
+  meas tran Vw_p1  FIND V(xmod0.xarray.vw_0_0) AT=65n
+  meas tran Vw_p2  FIND V(xmod0.xarray.vw_0_0) AT=85n
+  meas tran Vw_p3  FIND V(xmod0.xarray.vw_0_0) AT=105n
+  meas tran Vw_p4  FIND V(xmod0.xarray.vw_0_0) AT=125n
+  meas tran Vw_p5  FIND V(xmod0.xarray.vw_0_0) AT=145n
+  meas tran Vw_p6  FIND V(xmod0.xarray.vw_0_0) AT=165n
+  meas tran Vw_p7  FIND V(xmod0.xarray.vw_0_0) AT=185n
+  meas tran Vw_p8  FIND V(xmod0.xarray.vw_0_0) AT=205n
+  meas tran Vw_p9  FIND V(xmod0.xarray.vw_0_0) AT=225n
+  meas tran Vw_p10 FIND V(xmod0.xarray.vw_0_0) AT=245n
+
+  echo "  Weight after each pulse (row0,col0):"
+  echo "    pulse 0 (initial .ic):  " $&Vw_p0  " V"
+  echo "    pulse 1:                " $&Vw_p1  " V  ΔVw=" $&(Vw_p1-Vw_p0) " V"
+  echo "    pulse 2:                " $&Vw_p2  " V  ΔVw=" $&(Vw_p2-Vw_p1) " V"
+  echo "    pulse 3:                " $&Vw_p3  " V  ΔVw=" $&(Vw_p3-Vw_p2) " V"
+  echo "    pulse 4:                " $&Vw_p4  " V  ΔVw=" $&(Vw_p4-Vw_p3) " V"
+  echo "    pulse 5:                " $&Vw_p5  " V  ΔVw=" $&(Vw_p5-Vw_p4) " V"
+  echo "    pulse 6:                " $&Vw_p6  " V  ΔVw=" $&(Vw_p6-Vw_p5) " V"
+  echo "    pulse 7:                " $&Vw_p7  " V  ΔVw=" $&(Vw_p7-Vw_p6) " V"
+  echo "    pulse 8:                " $&Vw_p8  " V  ΔVw=" $&(Vw_p8-Vw_p7) " V"
+  echo "    pulse 9:                " $&Vw_p9  " V  ΔVw=" $&(Vw_p9-Vw_p8) " V"
+  echo "    pulse 10:               " $&Vw_p10 " V  ΔVw=" $&(Vw_p10-Vw_p9) " V"
+  echo ""
+
+  let total_dVw = Vw_p10 - Vw_p0
+  let total_dVw_mV = total_dVw * 1000
+  echo "  Total ΔVw over 10 pulses: " $&total_dVw_mV " mV"
+  echo "  Mean ΔVw per pulse:        " $&(total_dVw_mV/10) " mV/pulse"
+
+  write output/p2_multi.raw
+  wrdata output/p2_multi.csv v(xmod0.xarray.vw_0_0) v(m0_err0) v(m0_we0) v(m0_iout0)
+  echo "  Saved: output/p2_multi.raw  output/p2_multi.csv"
+
+
+  echo ""
+  echo "======================================================"
+  echo " All tests complete"
+  echo "======================================================"
+
+  quit
+
+.endc
+
+.end

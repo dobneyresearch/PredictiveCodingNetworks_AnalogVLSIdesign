@@ -1,0 +1,262 @@
+* =============================================================================
+* PCN 4-Layer Chip — Top-level SPICE netlist
+* File:      pcn_chip_4layer.spice
+* Config:    4 modules × 16 rows × 16 cols = 256 weights per module, 1024 total
+*
+* Hierarchy:
+*   pcn_chip_4layer
+*     bias_gen              — shared bias rails (vbias_n, vcm, vpi)
+*     pcn_module_16x16 ×4   — mod0..mod3 (array + current_sub + precision_gate per row)
+*     layer_link_16 ×3      — link_01, link_12, link_23
+*
+* Signal flow (vertical = layers, r = row index 0..15):
+*
+*   Module 0 (bottom):  raw_inp_r  → array → m0_iout_r
+*   Link 01 ascending:  m0_iout_r  → source follower → m1_inp_r
+*   Link 01 descending: m1_iout_r  → NMOS sink       → m0_pred_r
+*   Module 1:           m1_inp_r   → array → m1_iout_r
+*   Link 12 ascending:  m1_iout_r  → source follower → m2_inp_r
+*   Link 12 descending: m2_iout_r  → NMOS sink       → m1_pred_r
+*   Module 2:           m2_inp_r   → array → m2_iout_r
+*   Link 23 ascending:  m2_iout_r  → source follower → m3_inp_r
+*   Link 23 descending: m3_iout_r  → NMOS sink       → m2_pred_r
+*   Module 3 (top):     m3_inp_r   → array → m3_iout_r  (chip output)
+*
+* Module port order (pcn_module_16x16):
+*   [0..31]   inp_col_c inn_col_c  (16 differential column input pairs)
+*   [32..47]  iout_row_r           (16 KCL bus outputs — exposed for layer_link)
+*   [48..63]  i_pred_r             (16 prediction current inputs from layer above)
+*   [64..79]  ierr_dig_r           (16 digital error flags → hebb_ctrl.ierr[r])
+*   [80..95]  we_row_r             (16 Hebbian write enables ← hebb_ctrl.we_out[r])
+*   [96..111] vpi_r                (16 precision threshold voltages)
+*   [112..116] vbias_p vbias_n vcm vdd vss
+*
+* Digital interface:
+*   Each module k has a companion RTL instance pcn_digital_top #(N_ROWS=16, N_COLS=16).
+*   ierr_m{k}_r  → pcn_digital_top_{k}.ierr[r]
+*   we_m{k}_r    ← pcn_digital_top_{k}.we_out[r]
+*   DAC path (dac_addr/dac_data/dac_we → mac_cell.iwrite) handled in RTL only.
+*
+* Module 3 i_pred = vss: zero prediction → all activity = error → maximum
+*   unsupervised learning at the top layer. For supervised operation, replace
+*   vss with external feedback currents on the i_pred ports.
+* =============================================================================
+
+.title PCN 4-Layer 16x16 Chip
+
+* ── Library includes ──────────────────────────────────────────────────────────
+.include "pcn_mac_cell.spice"
+.include "bias_gen.spice"
+.include "pcn_array_16x16.spice"
+.include "pcn_module_16x16.spice"
+.include "layer_link.spice"
+
+* ── Supply ────────────────────────────────────────────────────────────────────
+.param vdd_val=1.8
+Vvdd vdd 0 DC {vdd_val}
+Vvss vss 0 DC 0
+
+* ── Shared bias generator ─────────────────────────────────────────────────────
+* vbias_n ≈ 0.6 V (tail current / source follower bias)
+* vcm     ≈ 0.9 V (common-mode reference for all diff pairs)
+* vpi     ≈ 0.65 V (precision threshold; shared across all rows/modules initially)
+Xbias  vbias_n  vcm  vpi  vdd  vss  bias_gen
+
+* =============================================================================
+* Module 0 — bottom layer, receives raw 16-channel input
+* =============================================================================
+Xmod0
++ raw_inp_0  vcm  raw_inp_1  vcm  raw_inp_2  vcm  raw_inp_3  vcm
++ raw_inp_4  vcm  raw_inp_5  vcm  raw_inp_6  vcm  raw_inp_7  vcm
++ raw_inp_8  vcm  raw_inp_9  vcm  raw_inp_10 vcm  raw_inp_11 vcm
++ raw_inp_12 vcm  raw_inp_13 vcm  raw_inp_14 vcm  raw_inp_15 vcm
++ m0_iout_0  m0_iout_1  m0_iout_2  m0_iout_3
++ m0_iout_4  m0_iout_5  m0_iout_6  m0_iout_7
++ m0_iout_8  m0_iout_9  m0_iout_10 m0_iout_11
++ m0_iout_12 m0_iout_13 m0_iout_14 m0_iout_15
++ m0_pred_0  m0_pred_1  m0_pred_2  m0_pred_3
++ m0_pred_4  m0_pred_5  m0_pred_6  m0_pred_7
++ m0_pred_8  m0_pred_9  m0_pred_10 m0_pred_11
++ m0_pred_12 m0_pred_13 m0_pred_14 m0_pred_15
++ ierr_m0_0  ierr_m0_1  ierr_m0_2  ierr_m0_3
++ ierr_m0_4  ierr_m0_5  ierr_m0_6  ierr_m0_7
++ ierr_m0_8  ierr_m0_9  ierr_m0_10 ierr_m0_11
++ ierr_m0_12 ierr_m0_13 ierr_m0_14 ierr_m0_15
++ we_m0_0  we_m0_1  we_m0_2  we_m0_3
++ we_m0_4  we_m0_5  we_m0_6  we_m0_7
++ we_m0_8  we_m0_9  we_m0_10 we_m0_11
++ we_m0_12 we_m0_13 we_m0_14 we_m0_15
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ nc_vbias_p  vbias_n  vcm  vdd  vss
++ pcn_module_16x16
+
+* =============================================================================
+* Layer link 0 → 1
+* =============================================================================
+* iout_lower = m0_iout (ascending source, driven by mod0)
+* inp_upper  = m1_inp  (ascending destination, drives mod1 column inputs)
+* i_pred     = m0_pred (descending destination, drives mod0 current_sub.i_pred)
+* iout_upper = m1_iout (descending source; shared net with Xmod1.iout_row)
+Xlink_01
++ m0_iout_0  m0_iout_1  m0_iout_2  m0_iout_3
++ m0_iout_4  m0_iout_5  m0_iout_6  m0_iout_7
++ m0_iout_8  m0_iout_9  m0_iout_10 m0_iout_11
++ m0_iout_12 m0_iout_13 m0_iout_14 m0_iout_15
++ m1_inp_0  m1_inp_1  m1_inp_2  m1_inp_3
++ m1_inp_4  m1_inp_5  m1_inp_6  m1_inp_7
++ m1_inp_8  m1_inp_9  m1_inp_10 m1_inp_11
++ m1_inp_12 m1_inp_13 m1_inp_14 m1_inp_15
++ m0_pred_0  m0_pred_1  m0_pred_2  m0_pred_3
++ m0_pred_4  m0_pred_5  m0_pred_6  m0_pred_7
++ m0_pred_8  m0_pred_9  m0_pred_10 m0_pred_11
++ m0_pred_12 m0_pred_13 m0_pred_14 m0_pred_15
++ m1_iout_0  m1_iout_1  m1_iout_2  m1_iout_3
++ m1_iout_4  m1_iout_5  m1_iout_6  m1_iout_7
++ m1_iout_8  m1_iout_9  m1_iout_10 m1_iout_11
++ m1_iout_12 m1_iout_13 m1_iout_14 m1_iout_15
++ vbias_n vdd vss
++ layer_link_16
+
+* =============================================================================
+* Module 1
+* =============================================================================
+* m1_inp_r: driven by Xlink_01 source followers (≈ m0_iout_r − Vth_sf ≈ 0.75 V base)
+* m1_iout_r: shared net — appears in Xlink_01 (iout_upper) and Xlink_12 (iout_lower)
+Xmod1
++ m1_inp_0  vcm  m1_inp_1  vcm  m1_inp_2  vcm  m1_inp_3  vcm
++ m1_inp_4  vcm  m1_inp_5  vcm  m1_inp_6  vcm  m1_inp_7  vcm
++ m1_inp_8  vcm  m1_inp_9  vcm  m1_inp_10 vcm  m1_inp_11 vcm
++ m1_inp_12 vcm  m1_inp_13 vcm  m1_inp_14 vcm  m1_inp_15 vcm
++ m1_iout_0  m1_iout_1  m1_iout_2  m1_iout_3
++ m1_iout_4  m1_iout_5  m1_iout_6  m1_iout_7
++ m1_iout_8  m1_iout_9  m1_iout_10 m1_iout_11
++ m1_iout_12 m1_iout_13 m1_iout_14 m1_iout_15
++ m1_pred_0  m1_pred_1  m1_pred_2  m1_pred_3
++ m1_pred_4  m1_pred_5  m1_pred_6  m1_pred_7
++ m1_pred_8  m1_pred_9  m1_pred_10 m1_pred_11
++ m1_pred_12 m1_pred_13 m1_pred_14 m1_pred_15
++ ierr_m1_0  ierr_m1_1  ierr_m1_2  ierr_m1_3
++ ierr_m1_4  ierr_m1_5  ierr_m1_6  ierr_m1_7
++ ierr_m1_8  ierr_m1_9  ierr_m1_10 ierr_m1_11
++ ierr_m1_12 ierr_m1_13 ierr_m1_14 ierr_m1_15
++ we_m1_0  we_m1_1  we_m1_2  we_m1_3
++ we_m1_4  we_m1_5  we_m1_6  we_m1_7
++ we_m1_8  we_m1_9  we_m1_10 we_m1_11
++ we_m1_12 we_m1_13 we_m1_14 we_m1_15
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ nc_vbias_p  vbias_n  vcm  vdd  vss
++ pcn_module_16x16
+
+* =============================================================================
+* Layer link 1 → 2
+* =============================================================================
+Xlink_12
++ m1_iout_0  m1_iout_1  m1_iout_2  m1_iout_3
++ m1_iout_4  m1_iout_5  m1_iout_6  m1_iout_7
++ m1_iout_8  m1_iout_9  m1_iout_10 m1_iout_11
++ m1_iout_12 m1_iout_13 m1_iout_14 m1_iout_15
++ m2_inp_0  m2_inp_1  m2_inp_2  m2_inp_3
++ m2_inp_4  m2_inp_5  m2_inp_6  m2_inp_7
++ m2_inp_8  m2_inp_9  m2_inp_10 m2_inp_11
++ m2_inp_12 m2_inp_13 m2_inp_14 m2_inp_15
++ m1_pred_0  m1_pred_1  m1_pred_2  m1_pred_3
++ m1_pred_4  m1_pred_5  m1_pred_6  m1_pred_7
++ m1_pred_8  m1_pred_9  m1_pred_10 m1_pred_11
++ m1_pred_12 m1_pred_13 m1_pred_14 m1_pred_15
++ m2_iout_0  m2_iout_1  m2_iout_2  m2_iout_3
++ m2_iout_4  m2_iout_5  m2_iout_6  m2_iout_7
++ m2_iout_8  m2_iout_9  m2_iout_10 m2_iout_11
++ m2_iout_12 m2_iout_13 m2_iout_14 m2_iout_15
++ vbias_n vdd vss
++ layer_link_16
+
+* =============================================================================
+* Module 2
+* =============================================================================
+Xmod2
++ m2_inp_0  vcm  m2_inp_1  vcm  m2_inp_2  vcm  m2_inp_3  vcm
++ m2_inp_4  vcm  m2_inp_5  vcm  m2_inp_6  vcm  m2_inp_7  vcm
++ m2_inp_8  vcm  m2_inp_9  vcm  m2_inp_10 vcm  m2_inp_11 vcm
++ m2_inp_12 vcm  m2_inp_13 vcm  m2_inp_14 vcm  m2_inp_15 vcm
++ m2_iout_0  m2_iout_1  m2_iout_2  m2_iout_3
++ m2_iout_4  m2_iout_5  m2_iout_6  m2_iout_7
++ m2_iout_8  m2_iout_9  m2_iout_10 m2_iout_11
++ m2_iout_12 m2_iout_13 m2_iout_14 m2_iout_15
++ m2_pred_0  m2_pred_1  m2_pred_2  m2_pred_3
++ m2_pred_4  m2_pred_5  m2_pred_6  m2_pred_7
++ m2_pred_8  m2_pred_9  m2_pred_10 m2_pred_11
++ m2_pred_12 m2_pred_13 m2_pred_14 m2_pred_15
++ ierr_m2_0  ierr_m2_1  ierr_m2_2  ierr_m2_3
++ ierr_m2_4  ierr_m2_5  ierr_m2_6  ierr_m2_7
++ ierr_m2_8  ierr_m2_9  ierr_m2_10 ierr_m2_11
++ ierr_m2_12 ierr_m2_13 ierr_m2_14 ierr_m2_15
++ we_m2_0  we_m2_1  we_m2_2  we_m2_3
++ we_m2_4  we_m2_5  we_m2_6  we_m2_7
++ we_m2_8  we_m2_9  we_m2_10 we_m2_11
++ we_m2_12 we_m2_13 we_m2_14 we_m2_15
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ nc_vbias_p  vbias_n  vcm  vdd  vss
++ pcn_module_16x16
+
+* =============================================================================
+* Layer link 2 → 3
+* =============================================================================
+Xlink_23
++ m2_iout_0  m2_iout_1  m2_iout_2  m2_iout_3
++ m2_iout_4  m2_iout_5  m2_iout_6  m2_iout_7
++ m2_iout_8  m2_iout_9  m2_iout_10 m2_iout_11
++ m2_iout_12 m2_iout_13 m2_iout_14 m2_iout_15
++ m3_inp_0  m3_inp_1  m3_inp_2  m3_inp_3
++ m3_inp_4  m3_inp_5  m3_inp_6  m3_inp_7
++ m3_inp_8  m3_inp_9  m3_inp_10 m3_inp_11
++ m3_inp_12 m3_inp_13 m3_inp_14 m3_inp_15
++ m2_pred_0  m2_pred_1  m2_pred_2  m2_pred_3
++ m2_pred_4  m2_pred_5  m2_pred_6  m2_pred_7
++ m2_pred_8  m2_pred_9  m2_pred_10 m2_pred_11
++ m2_pred_12 m2_pred_13 m2_pred_14 m2_pred_15
++ m3_iout_0  m3_iout_1  m3_iout_2  m3_iout_3
++ m3_iout_4  m3_iout_5  m3_iout_6  m3_iout_7
++ m3_iout_8  m3_iout_9  m3_iout_10 m3_iout_11
++ m3_iout_12 m3_iout_13 m3_iout_14 m3_iout_15
++ vbias_n vdd vss
++ layer_link_16
+
+* =============================================================================
+* Module 3 — top layer, i_pred = vss (no layer above)
+* =============================================================================
+* m3_iout_r: chip output representation of the most abstract layer.
+*   — drives Xlink_23 iout_upper (descending prediction to mod2)
+*   — available as chip output ports for observation or inter-chip chaining
+*   — to chain to a second chip, route m3_iout_r through ipred_out pad drivers
+Xmod3
++ m3_inp_0  vcm  m3_inp_1  vcm  m3_inp_2  vcm  m3_inp_3  vcm
++ m3_inp_4  vcm  m3_inp_5  vcm  m3_inp_6  vcm  m3_inp_7  vcm
++ m3_inp_8  vcm  m3_inp_9  vcm  m3_inp_10 vcm  m3_inp_11 vcm
++ m3_inp_12 vcm  m3_inp_13 vcm  m3_inp_14 vcm  m3_inp_15 vcm
++ m3_iout_0  m3_iout_1  m3_iout_2  m3_iout_3
++ m3_iout_4  m3_iout_5  m3_iout_6  m3_iout_7
++ m3_iout_8  m3_iout_9  m3_iout_10 m3_iout_11
++ m3_iout_12 m3_iout_13 m3_iout_14 m3_iout_15
++ vss vss vss vss  vss vss vss vss
++ vss vss vss vss  vss vss vss vss
++ ierr_m3_0  ierr_m3_1  ierr_m3_2  ierr_m3_3
++ ierr_m3_4  ierr_m3_5  ierr_m3_6  ierr_m3_7
++ ierr_m3_8  ierr_m3_9  ierr_m3_10 ierr_m3_11
++ ierr_m3_12 ierr_m3_13 ierr_m3_14 ierr_m3_15
++ we_m3_0  we_m3_1  we_m3_2  we_m3_3
++ we_m3_4  we_m3_5  we_m3_6  we_m3_7
++ we_m3_8  we_m3_9  we_m3_10 we_m3_11
++ we_m3_12 we_m3_13 we_m3_14 we_m3_15
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ vpi vpi vpi vpi  vpi vpi vpi vpi
++ nc_vbias_p  vbias_n  vcm  vdd  vss
++ pcn_module_16x16
+
+* ── nc_vbias_p ────────────────────────────────────────────────────────────────
+* Floating node — pcn_module_16x16.vbias_p is reserved for ipred_out pad drivers
+* (not instantiated here).  Connect to bias_gen vbias_p when adding inter-chip pads.
+
+.end

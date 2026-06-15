@@ -1,0 +1,72 @@
+* =============================================================================
+* PCN Module — Analog Core Cell Library  v3  (Path A true tail fix)
+* File:      pcn_mac_cell_v3b.spice
+* Process:   SkyWater Sky130A  (sky130_fd_pr)
+* Simulator: ngspice 37+
+*
+* Change from mac_cell_v2:
+*
+*   MN3_fixed  gate = vbias_n  (was: gate = vw)
+*
+* Root cause (§58 analysis):
+*   In mac_cell / mac_cell_v2, MN3 tail gate = Vw.  When the complementary
+*   SF in layer_link_v2 delivers V(inp1) > Vcm, the ntail node must track
+*   V(inp_cm) = V(inp1) − Vgs_diffpair.  For this to keep MN3 in saturation,
+*   Vw > V(ntail) + Vth_N ≈ (V(inp1) − 0.5) + 0.48 ≈ V(inp1) − 0.02.
+*   With V(inp1)=1.52V this requires Vw > 1.50V — above the 1.35V maximum.
+*   MN3 enters triode → I_tail collapses → PMOS mirror is pushed fully off
+*   → V(iout) → VDD → gain = 0.
+*
+* Fix:
+*   Gate MN3 from vbias_n (0.760V stiff supply from bias_gen) instead of Vw.
+*   I_tail ≈ constant ≈ 180 µA (W=10/L=0.35 at Vgs=0.760V, matching original
+*   operating point at Vw=0.752V).  The tail is now independent of inp_cm.
+*
+*   Weight storage (Cw) and CMOS TG (MN4/MP4) are preserved — Vw is still
+*   a stored value on Cw.  In this cell Vw does NOT modulate Gm; gain is
+*   fixed by vbias_n.  Full Gm-weighted multiply-accumulate (Gilbert cell or
+*   variable degeneration) is the next step after DC operating point is
+*   verified.
+*
+* New port: vbias_n added between we and vdd.
+*
+* Port list:
+*   iout    output current node           → to accumulation bus
+*   inp     differential input IN+        ← signal
+*   inn     differential input IN−        ← Vcm reference for single-ended
+*   vw      weight voltage node           ← stored weight (Cw=200fF)
+*   iwrite  Hebbian update current input  ← hebbian_mult output
+*   we      write enable  (0 / 1.8V)
+*   vbias_n fixed tail bias (0.760V from bias_gen)
+*   vdd     1.8V supply
+*   vss     0V ground
+*
+* Reference: pred_code_networks.md §59 (Path A true tail fix)
+* =============================================================================
+
+.subckt mac_cell_v3b iout inp inn vw iwrite we vbias_n vdd vss
+
+* ── PMOS current mirror load (unchanged from mac_cell_v2) ────────────────
+* MP2 W=3.75 µm retained so V(iout_balanced) stays near Vcm at Rload=100kΩ.
+XMP1 nmp1 nmp1 vdd vdd sky130_fd_pr__pfet_01v8 w=4    l=0.35
+XMP2 iout nmp1 vdd vdd sky130_fd_pr__pfet_01v8 w=3.50 l=0.35
+
+* ── NMOS differential input pair (unchanged) ─────────────────────────────
+XMN1 nmp1  inp  ntail vss sky130_fd_pr__nfet_01v8 w=2 l=0.35
+XMN2 iout  inn  ntail vss sky130_fd_pr__nfet_01v8 w=2 l=0.35
+
+* ── Fixed tail current transistor — gate = vbias_n ────────────────────────
+* I_tail ≈ 180 µA total (W=10/L=0.35 at Vgs=0.760V → same as original
+* mac_cell at Vw=0.752V).  No longer tracks inp_cm variations.
+XMN3 ntail vbias_n vss vss sky130_fd_pr__nfet_01v8 w=10 l=0.35
+
+* ── Weight storage capacitor (unchanged) ────────────────────────────────
+* Vw is preserved for future Gm modulation; Cw holds the written value.
+Cw vw vss 200e-15
+
+* ── CMOS Transmission Gate for weight access (unchanged from §56) ────────
+Bwe_n we_n 0 V = v(vdd) - v(we)
+XMN4 iwrite we   vw     vss sky130_fd_pr__nfet_01v8  w=0.5 l=0.5
+XMP4 vw    we_n iwrite  vdd sky130_fd_pr__pfet_01v8  w=1.0 l=0.35
+
+.ends mac_cell_v3b

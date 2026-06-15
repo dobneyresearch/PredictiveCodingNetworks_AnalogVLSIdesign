@@ -1,0 +1,232 @@
+* =============================================================================
+* PCN Layer Link
+* File:      layer_link.spice
+* Simulator: ngspice 42+
+*
+* Connects two adjacent PCN modules (lower = module k, upper = module k+1).
+*
+* Two signal paths per row r:
+*
+*   ASCENDING (forward inference):
+*     lower.iout_row_r  ──[PMOS source follower]──→  upper.inp_col_r
+*     The lower module's KCL bus voltage (≈0.883 V; centered by L=0.7µm PMOS CLM
+*     fix §70) is raised by a PMOS SF: V(inp_upper) = V(iout_lower) + |Vgs_P| ≈ +0.65 V
+*     → ≈1.53 V.  A matched reference SF shifts Vcm → vcm_upper by the same |Vgs_P|,
+*     driving inn_col_r of the upper module.  Differential signal (inp−inn) is
+*     preserved across the shift (§71 PMOS SF spatial fix).
+*
+*   DESCENDING (prediction / error feedback):
+*     upper.iout_row_r  ──[NMOS sink]──→  lower.i_pred_r
+*     The upper module's KCL bus voltage is the prediction of what the lower
+*     module should be outputting.  An NMOS transistor with its gate driven
+*     by upper.iout_row_r sinks a proportional current from the lower module's
+*     current_sub.i_pred node, implementing the subtraction I_err = I_actual − I_pred.
+*     Sizing W=4/L=0.35 is matched to the current_sub PMOS mirror to give
+*     ≈1:1 cancellation at the operating point.
+*
+* Subcircuits:
+*   layer_link_row  — single row (one ascending + one descending path)
+*   layer_link_16   — 16 rows instantiated for a 16×16 module pair
+*   layer_link_4    — 4 rows for 4×4 module pairs
+*   layer_link_32   — 32 rows for 32×32 module pairs
+*
+* Port map (layer_link_row):
+*   iout_lower   — KCL bus from lower module's row r
+*   inp_upper    — column input to upper module's row r  [driven by PMOS SF]
+*   i_pred_lower — current_sub.i_pred node in lower module's row r
+*   iout_upper   — KCL bus from upper module's row r (carries prediction downward)
+*   vcm_upper    — shifted Vcm for inn_col of upper module [driven by reference PMOS SF]
+*   vcm_iout     — balanced iout OP of lower module (≈0.468 V; input to reference SF)
+*                  NOT the same as Vcm (=0.9V, the input CM) — set by current_sub loading
+*   vbias_n      — NMOS tail current-source bias (≈0.760 V from bias_gen)
+*   vdd vss
+*
+* Reference: pred_code_networks.md §§ 2.4, 36, 71; layer interconnect architecture
+* =============================================================================
+
+* -----------------------------------------------------------------------------
+* Subcircuit: layer_link_row  (one row connection)
+* -----------------------------------------------------------------------------
+.subckt layer_link_row iout_lower inp_upper i_pred_lower iout_upper vcm_upper vcm_iout vbias_n vdd vss
+
+* === ASCENDING PATH: lower.iout_row_r → upper.inp_col_r =====================
+*
+* PMOS source follower raises voltage: V(inp_upper) = V(iout_lower) + |Vgs_P| ≈ +0.65 V
+*   gate   = iout_lower  (≈0.883 V from lower module KCL bus; centered by §70 CLM fix)
+*   source = inp_upper   (≈1.53 V; presented as inp_col to upper module diff pair)
+*   drain  = n_sf_d      (pulled toward VSS by NMOS tail current source)
+*   bulk   = vdd         (PMOS bulk always tied to VDD in Sky130A)
+* Transfer: V(inp_upper) = V(iout_lower) + |Vgs_P|  (PMOS: source is the HIGH terminal)
+* W=4/L=0.5: |Vgs_P| ≈ 0.65 V; upper module diff pair Vgs > Vth (0.48 V) at all layers.
+XMSF   n_sf_d  iout_lower  inp_upper  vdd  sky130_fd_pr__pfet_01v8  w=4  l=0.5
+
+* NMOS tail current source (same sizing as original design).
+* W=2/L=1 at vbias_n=0.760 V → I_tail ≈ 5–10 µA (keeps PMOS SF in saturation).
+XMTAIL  n_sf_d  vbias_n  vss  vss  sky130_fd_pr__nfet_01v8  w=2  l=1
+
+* Reference PMOS SF: vcm_iout → vcm_upper (matched circuit for inn_col of upper module).
+* vcm_iout is the actual balanced iout OP (≈0.468V, set by current_sub), NOT Vcm (0.9V).
+* V(vcm_upper) = V(vcm_iout) + |Vgs_P|  — identical shift to signal SF.
+* Differential preservation: V(inp_upper) − V(vcm_upper) = V(iout_lower) − V(vcm_iout) exactly.
+XMSF_ref    n_sfref_d  vcm_iout  vcm_upper  vdd  sky130_fd_pr__pfet_01v8  w=4  l=0.5
+XMTAIL_ref  n_sfref_d  vbias_n  vss   vss  sky130_fd_pr__nfet_01v8  w=2  l=1
+
+* === DESCENDING PATH: upper.iout_row_r → lower.i_pred ========================
+*
+* NMOS prediction sink:
+*   gate  = iout_upper  (≈0.883 V + small signal = prediction from upper module)
+*   drain = i_pred_lower  (= current_sub[r].i_pred node in lower module)
+*   source = vss
+*
+* V2 trained-state suppression: R-divider attenuates V(iout_upper) before XMPRED gate.
+* R1=300kΩ (iout_upper→ngate_pred) + R2=500kΩ (ngate_pred→VSS) → ratio = 500/800 = 0.625.
+* τ = (R1||R2)×Cgate = 187.5kΩ×12fF ≈ 2.3ns — fast enough for signal bandwidth.
+R_pred1  ngate_pred  iout_upper  300k
+R_pred2  ngate_pred  vss         500k
+
+* Sizing W=4/L=0.35: at trained state, I_XMPRED ≈ I_MPG2 for error cancellation.
+XMPRED  i_pred_lower  ngate_pred  vss  vss  sky130_fd_pr__nfet_01v8  w=4  l=0.35
+
+.ends layer_link_row
+
+
+* -----------------------------------------------------------------------------
+* Subcircuit: layer_link_16  (16 rows — for 16×16 module pairs)
+* -----------------------------------------------------------------------------
+* Ports follow the indexed naming convention used by pcn_module_16x16:
+*   iout_lower_r  = lower module's iout_row_r
+*   inp_upper_r   = upper module's inp_col_r     [driven by PMOS SF]
+*   i_pred_r      = lower module's i_pred_r      (current_sub input)
+*   iout_upper_r  = upper module's iout_row_r    (carries prediction downward)
+*   vcm_upper     = shifted Vcm for inn_col of upper module [reference SF output]
+*   vcm_iout, vbias_n, vdd, vss
+* -----------------------------------------------------------------------------
+.subckt layer_link_16
++ iout_lower_0  iout_lower_1  iout_lower_2  iout_lower_3
++ iout_lower_4  iout_lower_5  iout_lower_6  iout_lower_7
++ iout_lower_8  iout_lower_9  iout_lower_10 iout_lower_11
++ iout_lower_12 iout_lower_13 iout_lower_14 iout_lower_15
++ inp_upper_0   inp_upper_1   inp_upper_2   inp_upper_3
++ inp_upper_4   inp_upper_5   inp_upper_6   inp_upper_7
++ inp_upper_8   inp_upper_9   inp_upper_10  inp_upper_11
++ inp_upper_12  inp_upper_13  inp_upper_14  inp_upper_15
++ i_pred_0  i_pred_1  i_pred_2  i_pred_3
++ i_pred_4  i_pred_5  i_pred_6  i_pred_7
++ i_pred_8  i_pred_9  i_pred_10 i_pred_11
++ i_pred_12 i_pred_13 i_pred_14 i_pred_15
++ iout_upper_0  iout_upper_1  iout_upper_2  iout_upper_3
++ iout_upper_4  iout_upper_5  iout_upper_6  iout_upper_7
++ iout_upper_8  iout_upper_9  iout_upper_10 iout_upper_11
++ iout_upper_12 iout_upper_13 iout_upper_14 iout_upper_15
++ vcm_upper vcm_iout vbias_n vdd vss
+
+Xlink_0  iout_lower_0  inp_upper_0  i_pred_0  iout_upper_0  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_1  iout_lower_1  inp_upper_1  i_pred_1  iout_upper_1  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_2  iout_lower_2  inp_upper_2  i_pred_2  iout_upper_2  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_3  iout_lower_3  inp_upper_3  i_pred_3  iout_upper_3  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_4  iout_lower_4  inp_upper_4  i_pred_4  iout_upper_4  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_5  iout_lower_5  inp_upper_5  i_pred_5  iout_upper_5  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_6  iout_lower_6  inp_upper_6  i_pred_6  iout_upper_6  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_7  iout_lower_7  inp_upper_7  i_pred_7  iout_upper_7  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_8  iout_lower_8  inp_upper_8  i_pred_8  iout_upper_8  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_9  iout_lower_9  inp_upper_9  i_pred_9  iout_upper_9  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_10 iout_lower_10 inp_upper_10 i_pred_10 iout_upper_10 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_11 iout_lower_11 inp_upper_11 i_pred_11 iout_upper_11 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_12 iout_lower_12 inp_upper_12 i_pred_12 iout_upper_12 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_13 iout_lower_13 inp_upper_13 i_pred_13 iout_upper_13 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_14 iout_lower_14 inp_upper_14 i_pred_14 iout_upper_14 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_15 iout_lower_15 inp_upper_15 i_pred_15 iout_upper_15 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+
+.ends layer_link_16
+
+
+* -----------------------------------------------------------------------------
+* Subcircuit: layer_link_4  (4 rows — for 4×4 module pairs)
+* -----------------------------------------------------------------------------
+.subckt layer_link_4
++ iout_lower_0  iout_lower_1  iout_lower_2  iout_lower_3
++ inp_upper_0   inp_upper_1   inp_upper_2   inp_upper_3
++ i_pred_0  i_pred_1  i_pred_2  i_pred_3
++ iout_upper_0  iout_upper_1  iout_upper_2  iout_upper_3
++ vcm_upper vcm_iout vbias_n vdd vss
+
+Xlink_0  iout_lower_0  inp_upper_0  i_pred_0  iout_upper_0  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_1  iout_lower_1  inp_upper_1  i_pred_1  iout_upper_1  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_2  iout_lower_2  inp_upper_2  i_pred_2  iout_upper_2  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_3  iout_lower_3  inp_upper_3  i_pred_3  iout_upper_3  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+
+.ends layer_link_4
+
+
+* -----------------------------------------------------------------------------
+* Subcircuit: layer_link_32  (32 rows — for 32×32 module pairs)
+* -----------------------------------------------------------------------------
+.subckt layer_link_32
++ iout_lower_0  iout_lower_1  iout_lower_2  iout_lower_3
++ iout_lower_4  iout_lower_5  iout_lower_6  iout_lower_7
++ iout_lower_8  iout_lower_9  iout_lower_10 iout_lower_11
++ iout_lower_12 iout_lower_13 iout_lower_14 iout_lower_15
++ iout_lower_16 iout_lower_17 iout_lower_18 iout_lower_19
++ iout_lower_20 iout_lower_21 iout_lower_22 iout_lower_23
++ iout_lower_24 iout_lower_25 iout_lower_26 iout_lower_27
++ iout_lower_28 iout_lower_29 iout_lower_30 iout_lower_31
++ inp_upper_0   inp_upper_1   inp_upper_2   inp_upper_3
++ inp_upper_4   inp_upper_5   inp_upper_6   inp_upper_7
++ inp_upper_8   inp_upper_9   inp_upper_10  inp_upper_11
++ inp_upper_12  inp_upper_13  inp_upper_14  inp_upper_15
++ inp_upper_16  inp_upper_17  inp_upper_18  inp_upper_19
++ inp_upper_20  inp_upper_21  inp_upper_22  inp_upper_23
++ inp_upper_24  inp_upper_25  inp_upper_26  inp_upper_27
++ inp_upper_28  inp_upper_29  inp_upper_30  inp_upper_31
++ i_pred_0  i_pred_1  i_pred_2  i_pred_3
++ i_pred_4  i_pred_5  i_pred_6  i_pred_7
++ i_pred_8  i_pred_9  i_pred_10 i_pred_11
++ i_pred_12 i_pred_13 i_pred_14 i_pred_15
++ i_pred_16 i_pred_17 i_pred_18 i_pred_19
++ i_pred_20 i_pred_21 i_pred_22 i_pred_23
++ i_pred_24 i_pred_25 i_pred_26 i_pred_27
++ i_pred_28 i_pred_29 i_pred_30 i_pred_31
++ iout_upper_0  iout_upper_1  iout_upper_2  iout_upper_3
++ iout_upper_4  iout_upper_5  iout_upper_6  iout_upper_7
++ iout_upper_8  iout_upper_9  iout_upper_10 iout_upper_11
++ iout_upper_12 iout_upper_13 iout_upper_14 iout_upper_15
++ iout_upper_16 iout_upper_17 iout_upper_18 iout_upper_19
++ iout_upper_20 iout_upper_21 iout_upper_22 iout_upper_23
++ iout_upper_24 iout_upper_25 iout_upper_26 iout_upper_27
++ iout_upper_28 iout_upper_29 iout_upper_30 iout_upper_31
++ vcm_upper vcm_iout vbias_n vdd vss
+
+Xlink_0  iout_lower_0  inp_upper_0  i_pred_0  iout_upper_0  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_1  iout_lower_1  inp_upper_1  i_pred_1  iout_upper_1  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_2  iout_lower_2  inp_upper_2  i_pred_2  iout_upper_2  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_3  iout_lower_3  inp_upper_3  i_pred_3  iout_upper_3  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_4  iout_lower_4  inp_upper_4  i_pred_4  iout_upper_4  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_5  iout_lower_5  inp_upper_5  i_pred_5  iout_upper_5  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_6  iout_lower_6  inp_upper_6  i_pred_6  iout_upper_6  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_7  iout_lower_7  inp_upper_7  i_pred_7  iout_upper_7  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_8  iout_lower_8  inp_upper_8  i_pred_8  iout_upper_8  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_9  iout_lower_9  inp_upper_9  i_pred_9  iout_upper_9  vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_10 iout_lower_10 inp_upper_10 i_pred_10 iout_upper_10 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_11 iout_lower_11 inp_upper_11 i_pred_11 iout_upper_11 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_12 iout_lower_12 inp_upper_12 i_pred_12 iout_upper_12 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_13 iout_lower_13 inp_upper_13 i_pred_13 iout_upper_13 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_14 iout_lower_14 inp_upper_14 i_pred_14 iout_upper_14 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_15 iout_lower_15 inp_upper_15 i_pred_15 iout_upper_15 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_16 iout_lower_16 inp_upper_16 i_pred_16 iout_upper_16 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_17 iout_lower_17 inp_upper_17 i_pred_17 iout_upper_17 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_18 iout_lower_18 inp_upper_18 i_pred_18 iout_upper_18 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_19 iout_lower_19 inp_upper_19 i_pred_19 iout_upper_19 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_20 iout_lower_20 inp_upper_20 i_pred_20 iout_upper_20 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_21 iout_lower_21 inp_upper_21 i_pred_21 iout_upper_21 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_22 iout_lower_22 inp_upper_22 i_pred_22 iout_upper_22 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_23 iout_lower_23 inp_upper_23 i_pred_23 iout_upper_23 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_24 iout_lower_24 inp_upper_24 i_pred_24 iout_upper_24 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_25 iout_lower_25 inp_upper_25 i_pred_25 iout_upper_25 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_26 iout_lower_26 inp_upper_26 i_pred_26 iout_upper_26 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_27 iout_lower_27 inp_upper_27 i_pred_27 iout_upper_27 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_28 iout_lower_28 inp_upper_28 i_pred_28 iout_upper_28 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_29 iout_lower_29 inp_upper_29 i_pred_29 iout_upper_29 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_30 iout_lower_30 inp_upper_30 i_pred_30 iout_upper_30 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+Xlink_31 iout_lower_31 inp_upper_31 i_pred_31 iout_upper_31 vcm_upper vcm_iout vbias_n vdd vss  layer_link_row
+
+.ends layer_link_32

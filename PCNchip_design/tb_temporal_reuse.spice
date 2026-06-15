@@ -1,0 +1,245 @@
+* =============================================================================
+* tb_temporal_reuse.spice — Path B: Temporal Layer Reuse Verification
+* Generated: 2026-06-12
+*
+* Verifies that a single physical MAC cell can emulate N virtual layers by
+* controlling inp via a voltage source (representing the SRAM-loaded activation
+* DAC), bypassing the source-follower level-shift constraint that limits
+* spatial pipeline gain.
+*
+* Key claim: with inp driven at Vcm by a DAC (not by a SF chain), OTA gain
+* is ~0.4 V/V at every virtual layer — vs 0.00138 V/V at spatial layer 1
+* (§51 reference, V(m1_iout)=0.696V, mod1 gain=0.00138).
+*
+* Circuit:
+*   Xcell:   mac_cell — inp controlled by Vinp_src (PWL = ideal inp_dac model)
+*                       weights set via weight_dac + WE pulse per virtual layer
+*   Xdac_w:  weight_dac — drives Vw for each virtual layer
+*   Vinp_src: PWL source representing SRAM-loaded activation (via inp_dac in
+*             the real chip; R-2R DAC identical to weight_dac driving the inp
+*             capacitor instead of the weight cap)
+*
+* Virtual layer sequence (3 VLs on 1 physical cell):
+*   VL0: Vw = word A = 0x6B (107) → 0.7523 V  (below midpoint)
+*   VL1: Vw = word B = 0x80 (128) → 0.9000 V  (mid-scale weight)
+*   VL2: Vw = word C = 0xC0 (192) → 1.3500 V  (above midpoint → reduced iout)
+*   Note: valid Vw range is Vw_min≈0.5V to Vw_max≈1.3V; below Vth≈0.48V the
+*     tail transistor cuts off and iout rails to VDD.
+*
+* Inp source: remains 0.900 V (= Vcm) throughout all VLs, mimicking a
+*   balanced activation loaded from activation SRAM. A brief 40 mV step at
+*   t=200-218 ns (during VL0) allows gain measurement.
+*
+* Tests:
+*   T1 — iout at each VL (inp = Vcm = 0.900 V, different Vw per VL)
+*         PASS: 0.30 V ≤ V(iout) ≤ 1.50 V at VL0, VL1, VL2.
+*   T2 — OTA gain with DAC-controlled inp (40 mV perturbation during VL0)
+*         PASS: gain = ΔV(iout)/Δinp ≥ 0.05 V/V.
+*         Spec from §51 single-cell tests: ~0.42 V/V.
+*         Spatial layer 1 reference (§51 §53.2): 0.00138 V/V.
+* =============================================================================
+
+.title PCN Temporal Layer Reuse Verification
+
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+.include "pcn_mac_cell.spice"
+.include "weight_dac.spice"
+
+.options RELTOL=1e-3 ABSTOL=1e-12 VNTOL=1e-6 GMIN=1e-10 ITL1=200 ITL4=100
+
+* ── Supplies ──────────────────────────────────────────────────────────────────
+Vvdd     vdd     0  DC 1.8
+Vvss     vss     0  DC 0
+* DAC full-scale reference = VDD; LSB = 1800mV/256 = 7mV
+Vref     vref    0  DC 1.8
+
+* ── Common-mode reference ─────────────────────────────────────────────────────
+Vcm  vcm  0  DC 0.9
+
+* ── inp_node: SRAM-loaded activation (ideal PWL, represents inp_dac output) ──
+* Real chip: inp_dac is an R-2R DAC (same design as weight_dac) that reads
+*   the activation SRAM and drives the inp node of the MAC cell.
+*   Code 128 (midscale) → Vdac = 0.9 V (= Vcm) → balanced input, full gain.
+*   This avoids the SF level shift: spatial link01 dropped 0.787 V, pushing
+*   V(m1_inp) to 0.532 V < Vcm → inverted diff pair → near-zero gain (§53.2).
+*
+* Timeline:
+*   0 – 200 ns:   inp = 0.900 V (VL0 compute, balanced activation)
+*   200 – 201 ns: ramp 0.900 → 0.940 V  (40 mV perturbation for T2 gain meas.)
+*   201 – 218 ns: hold 0.940 V
+*   218 – 219 ns: ramp 0.940 → 0.900 V
+*   219 – 900 ns: hold 0.900 V (VL1 and VL2 compute, same balanced activation)
+Vinp_src  inp_node  0  PWL(
++    0n 0.900
++  200n 0.900  201n 0.940
++  218n 0.940  219n 0.900
++  900n 0.900)
+
+* ── MAC cell under test ───────────────────────────────────────────────────────
+* inp = inp_node  — DAC-controlled activation (not SF-shifted from previous layer)
+* inn = vcm       — reference rail (0.900 V)
+* iwrite = vdac_out — weight loading (from weight_dac below)
+* we = we         — weight write enable (pulsed per VL)
+Xcell  nc_iout  inp_node  vcm  vw  vdac_out  we  vdd  vss  mac_cell
+Rload  nc_iout  vdd  100k
+
+* ── Weight DAC (R-2R, 8-bit; drives Vw via MN4 access transistor) ────────────
+Xdac  vdd  vss  vref  b7 b6 b5 b4 b3 b2 b1 b0  vdac_out  weight_dac
+
+* ── Scaled leakage (same as tb_sram_reload: R=1GΩ → τ=200µs) ────────────────
+R_leak  vw  vss  1000meg
+
+* ── SRAM weight words — 3 virtual layers ─────────────────────────────────────
+*
+* Weight write windows (WE pulses, 80 ns = 16τ each):
+*   VL0: 10 –  90 ns  word A = 0x6B (107) → Vdac = 0.7523 V
+*   VL1: 300 – 380 ns  word B = 0x80 (128) → Vdac = 0.9000 V
+*   VL2: 600 – 680 ns  word C = 0xC0 (192) → Vdac = 1.3500 V
+*
+* Bit transitions: 5 ns before each WE rising edge, 1 ns linear ramp.
+*   A→B at 294–295 ns,  B→C at 594–595 ns.
+*
+* Word A = 0x6B: b7=0 b6=1 b5=1 b4=0 b3=1 b2=0 b1=1 b0=1
+* Word B = 0x80: b7=1 b6=0 b5=0 b4=0 b3=0 b2=0 b1=0 b0=0
+* Word C = 0xC0: b7=1 b6=1 b5=0 b4=0 b3=0 b2=0 b1=0 b0=0
+
+*   b7: A=0  B=1  C=1  (rises at A→B, stays high through VL2)
+Vb7  b7  0  PWL(0n 0  294n 0  295n 1.8  900n 1.8)
+
+*   b6: A=1  B=0  C=1  (falls at A→B, rises again at B→C)
+Vb6  b6  0  PWL(0n 1.8  294n 1.8  295n 0  594n 0  595n 1.8  900n 1.8)
+
+*   b5: A=1  B=0  C=0
+Vb5  b5  0  PWL(0n 1.8  294n 1.8  295n 0  900n 0)
+
+*   b4: always 0
+Vb4  b4  0  DC 0
+
+*   b3: A=1  B=0  C=0  (same as b5)
+Vb3  b3  0  PWL(0n 1.8  294n 1.8  295n 0  900n 0)
+
+*   b2: always 0
+Vb2  b2  0  DC 0
+
+*   b1: A=1  B=0  C=0  (same as b5)
+Vb1  b1  0  PWL(0n 1.8  294n 1.8  295n 0  900n 0)
+
+*   b0: A=1  B=0  C=0  (same as b5)
+Vb0  b0  0  PWL(0n 1.8  294n 1.8  295n 0  900n 0)
+
+* ── Write enable pulse train (one 80 ns WE pulse per virtual layer) ───────────
+Vwe  we  0  PWL(0n 0
++    9n 0   10n 1.8   89n 1.8   90n 0
++  299n 0  300n 1.8  379n 1.8  380n 0
++  599n 0  600n 1.8  679n 1.8  680n 0
++  900n 0)
+
+* ── Nodesets ──────────────────────────────────────────────────────────────────
+.nodeset V(vw)=0.750  V(vdac_out)=0.752  V(nc_iout)=0.883  V(inp_node)=0.900
+
+* =============================================================================
+.control
+
+  set filetype = ascii
+
+  echo ""
+  echo "======================================================"
+  echo " T1+T2: Temporal reuse — 3 virtual layers, 1 physical MAC cell"
+  echo " inp = Vcm = 0.900 V (SRAM-loaded, DAC-controlled at all times)"
+  echo "======================================================"
+
+  tran 2n 900n
+
+  * ── T1: V(iout) and V(vw) at each virtual layer ─────────────────────────────
+  * Measurements taken well after the weight write settles (each WE falls by
+  * t=90, 380, 680 ns; module settling time ~10 ns; measured 100+ ns later).
+  meas tran Viout_VL0   FIND V(nc_iout)  AT=180n
+  meas tran Vvw_VL0     FIND V(vw)       AT=180n
+  meas tran Viout_VL1   FIND V(nc_iout)  AT=580n
+  meas tran Vvw_VL1     FIND V(vw)       AT=580n
+  meas tran Viout_VL2   FIND V(nc_iout)  AT=880n
+  meas tran Vvw_VL2     FIND V(vw)       AT=880n
+  * (VL2 target: 1.3500 V — word C = 0xC0 = 192)
+
+  * ── T2: gain measurement at VL0 (40 mV inp step) ────────────────────────────
+  * Balanced at t=180 ns (inp=0.900 V); perturbed at t=210 ns (inp=0.940 V).
+  * Same V(vw)=0.752 V for both measurements (WE is low, weight held on Cw).
+  meas tran Viout_bal   FIND V(nc_iout)  AT=180n
+  meas tran Viout_pert  FIND V(nc_iout)  AT=210n
+
+  * ── T1 reporting ─────────────────────────────────────────────────────────────
+  echo ""
+  echo "  T1: V(iout) at each virtual layer"
+  echo "  Valid range: 0.30 V – 1.50 V  (headroom-limited by Sky130A PMOS/NMOS)"
+  echo "  ------------------------------------------------------------------"
+
+  echo "  --- VL0: Vw = word A (0x6B = 107) → target 0.7523 V ---"
+  echo "  V(vw)   = " $&Vvw_VL0   "V"
+  echo "  V(iout) = " $&Viout_VL0 "V"
+  if Viout_VL0 > 0.30
+    if Viout_VL0 < 1.50
+      echo "  PASS: V(iout) in valid range"
+    else
+      echo "  FAIL: V(iout) saturated toward VDD"
+    end
+  else
+    echo "  FAIL: V(iout) saturated toward VSS"
+  end
+
+  echo ""
+  echo "  --- VL1: Vw = word B (0x80 = 128) → target 0.9000 V ---"
+  echo "  V(vw)   = " $&Vvw_VL1   "V"
+  echo "  V(iout) = " $&Viout_VL1 "V"
+  if Viout_VL1 > 0.30
+    if Viout_VL1 < 1.50
+      echo "  PASS: V(iout) in valid range"
+    else
+      echo "  FAIL: V(iout) saturated toward VDD"
+    end
+  else
+    echo "  FAIL: V(iout) saturated toward VSS"
+  end
+
+  echo ""
+  echo "  --- VL2: Vw = word C (0xC0 = 192) → target 1.3500 V ---"
+  echo "  V(vw)   = " $&Vvw_VL2   "V"
+  echo "  V(iout) = " $&Viout_VL2 "V"
+  if Viout_VL2 > 0.30
+    if Viout_VL2 < 1.50
+      echo "  PASS: V(iout) in valid range"
+    else
+      echo "  FAIL: V(iout) saturated toward VDD"
+    end
+  else
+    echo "  FAIL: V(iout) saturated toward VSS"
+  end
+
+  * ── T2 reporting ─────────────────────────────────────────────────────────────
+  echo ""
+  echo "  T2: OTA gain — DAC-controlled inp vs. spatial pipeline reference"
+  echo "  ------------------------------------------------------------------"
+  echo "  V(iout) at inp=0.900 V (balanced, t=180 ns):  " $&Viout_bal  "V"
+  echo "  V(iout) at inp=0.940 V (perturbed, t=210 ns): " $&Viout_pert "V"
+  let gain_VL0 = (Viout_pert - Viout_bal) / 0.040
+  echo "  Gain = dV(iout)/d(inp) = " $&gain_VL0 "V/V"
+  echo "  (spec from §51 single-cell: ~0.42 V/V)"
+  echo "  (spatial layer 1 reference from §51/§53.2: 0.00138 V/V)"
+  if gain_VL0 > 0.05
+    echo "  PASS: OTA gain restored to meaningful level (> 0.05 V/V)"
+  else
+    echo "  FAIL: gain too low — " $&gain_VL0 "V/V"
+  end
+
+  write  output/tb_temporal_reuse.raw
+  wrdata output/tb_temporal_reuse.csv V(nc_iout) V(vw) V(inp_node) V(we) V(vdac_out)
+  echo ""
+  echo "  Saved: output/tb_temporal_reuse.raw  output/tb_temporal_reuse.csv"
+
+  echo ""
+  echo "======================================================"
+  echo " Temporal reuse verification complete."
+  echo "======================================================"
+
+  quit
+.endc
+.end

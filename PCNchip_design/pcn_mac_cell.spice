@@ -1,0 +1,268 @@
+* =============================================================================
+* PCN Module — Analog Core Cell Library
+* File:      pcn_mac_cell.spice
+* Process:   SkyWater Sky130A  (sky130_fd_pr)
+* Simulator: ngspice 37+
+*
+* Subcircuits defined:
+*   mac_cell        single MAC cell  (one weight × one input dimension)
+*   hebbian_mult    Hebbian update current generator  (I_out ∝ Vpre × Vpost)
+*   current_sub     current-mode subtractor  (I_err = I_actual − I_pred)
+*   precision_gate  threshold-gated current switch
+*
+* Supply conventions:
+*   VDD = 1.8 V   (sky130_fd_pr__[np]fet_01v8 nominal supply)
+*   VSS = 0 V     (substrate / bulk reference)
+*
+* All W/L in MICRONS (ngspice hsa mode sets scale=1e-6).
+* Capacitor, resistor, voltage and current values remain in SI units.
+* =============================================================================
+
+
+* =============================================================================
+* Subcircuit: mac_cell
+* =============================================================================
+*
+* One multiply-accumulate cell.  Weight stored as voltage Vw on capacitor Cw.
+* MN3 (tail transistor): I_tail ∝ (Vw − Vth)²  — the weight IS this voltage.
+* MN1/MN2 (differential pair): split I_tail proportional to (Vinp − Vinn).
+* MP1/MP2 (PMOS current mirror load): convert differential current to
+*   single-ended output current at port IOUT.
+* MN4/MP4 (CMOS TG): gates weight update onto Cw when WE=high.
+*   MN4 (NMOS): dominant at Vw < 0.9V.  MP4 (PMOS): dominant at Vw > 0.9V.
+*   Together they cover the full usable weight range 0.5–1.3V (§55.4).
+*
+* Port list:
+*   iout    output current node           → to accumulation bus
+*   inp     differential input IN+        ← signal (one dim. of x_in)
+*   inn     differential input IN−        ← bias at Vcm for single-ended use
+*   vw      weight voltage node           ← probe / Hebbian write target
+*   iwrite  Hebbian update current input  ← connect hebbian_mult i_out here
+*   we      write enable (digital 0/1.8V) ← high = write, low = hold
+*   vdd     1.8 V supply
+*   vss     0 V ground
+*
+* Key operating parameters (Vw = 0.75 V, VDD = 1.8 V, VSS = 0 V):
+*   I_tail  ≈ 41 µA   (MN3 W=10/L=0.35µm; velocity saturation limits Id; simulated)
+*   gm      ≈ 202 µA/V (simulated 2026-06-10; W=10/L=0.35 for MN3)
+*   Vout_range ≈ 0.3 V to 1.5 V (limited by PMOS/NMOS headroom)
+*
+* Weight computation: MN3 gate = Vw.  I_tail ∝ (Vw − Vth)² → gm ∝ (Vw − Vth).
+*   Cell contribution to KCL bus: I_out ≈ gm(Vw) × (inp − inn) ∝ (Vw−Vth) × x.
+*   This is the weight × signal product required by the PCN inference rule.
+*
+* PMOS mirror sizing (§70): MP1/MP2 L = 0.7 µm (doubled from 0.35 µm).
+*   Reduces channel-length modulation (smaller λ) → better mirror accuracy,
+*   higher output impedance Rout → better voltage gain, improved V(iout) centering.
+*   gm_OTA is set by NMOS diff pair (unchanged); settling time τ = R_err×C_bus unchanged.
+* -----------------------------------------------------------------------------
+.subckt mac_cell iout inp inn vw iwrite we vdd vss
+
+* ── PMOS current mirror load ─────────────────────────────────────────────
+* MP1 diode-connected: gate=drain=nmp1, measures current from MN1 branch.
+* MP2 mirrors that current to the output node; matched W/L for unity gain.
+* L=0.7µm: reduces CLM vs L=0.35µm, improving mirror accuracy and output Rout (§70).
+XMP1 nmp1 nmp1 vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=0.7
+XMP2 iout nmp1 vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=0.7
+
+* ── NMOS differential input pair ─────────────────────────────────────────
+* MN1 drain → nmp1  (diode-connected MP1 side; sets mirror reference)
+* MN2 drain → iout  (output side; net I_iout = I_MP2 − I_MN2)
+* Source degeneration (optional) improves linearity: add Rs ~200Ω here.
+XMN1 nmp1  inp  ntail vss sky130_fd_pr__nfet_01v8 w=2 l=0.35
+XMN2 iout  inn  ntail vss sky130_fd_pr__nfet_01v8 w=2 l=0.35
+
+* ── Tail current transistor ─────────────────────────────────────────────
+* Gate = Vw; I_tail ∝ (Vw − Vth)² sets transconductance gm ∝ (Vw − Vth).
+* Weight × signal product is realised at the KCL bus: I_out ≈ gm(Vw) × (inp − inn).
+* W=10/L=0.35 sizing: sky130 BSIM4 velocity saturation limits current to
+* ~4µA/µm_W at Vgs=0.75V (square-law overestimates due to SCE at L=0.35µm).
+* Measured: W=5→147, W=7→175, W=9→195µA/V (sub-linear: ~10µA/V per µm_W).
+* W=10 → gm≈200µA/V target. Original W=1/L=1 gave gm=30µA/V.
+XMN3 ntail vw vss vss sky130_fd_pr__nfet_01v8 w=10 l=0.35
+
+* ── Weight storage capacitor ────────────────────────────────────────────
+* Vw held on Cw.  At room temp, MN4 subthreshold leakage ≈ 5–10 fA
+* → ΔVw/Δt ≈ 50 µV/s → 1% droop in ~200 s.  Hebbian updates refresh Vw
+* continuously during active operation.
+* MIM cap preferred for lower voltage coefficient; MOSCAP also works.
+Cw vw vss 200e-15
+
+* ── Weight access transistor — CMOS Transmission Gate ───────────────────────
+* MN4 (NMOS, W=0.5/L=0.5): source=vw, drain=iwrite, gate=we, bulk=vss.
+*   Dominant at low Vw (Vgs_N = WE-Vw large; body effect small).
+*   Body effect limits MN4 alone to Vw_max≈1.07V (Vth_eff rises with Vsb=Vw).
+* MP4 (PMOS, W=1.0/L=0.35): source=iwrite, drain=vw, gate=we_n, bulk=vdd.
+*   Dominant at high Vw (Vgs_P = we_n-V(iwrite) = -V(iwrite) ≪ Vthp when WE active).
+*   No equivalent body-effect ceiling: equalises V(vw)→V(iwrite) up to ~1.3V.
+* Together: usable range 0.5–1.3V ≈ 6.6 effective bits (extended from 6.3).
+* Hold (WE=0V, we_n=VDD): MN4 Vgs=0 OFF; MP4 Vgs_P=VDD-V(iwrite)>0>Vthp OFF.
+*
+* we_n is the digital complement of we.  Arithmetic B-source (valid for
+* WE ∈ {0, VDD}; avoids {?:} ternary incompatible with ngspice Hspice mode).
+Bwe_n we_n 0 V = v(vdd) - v(we)
+XMN4 iwrite we   vw     vss sky130_fd_pr__nfet_01v8 w=0.5 l=0.5
+XMP4 vw    we_n iwrite  vdd sky130_fd_pr__pfet_01v8 w=1.0 l=0.35
+
+.ends mac_cell
+
+
+* =============================================================================
+* Subcircuit: hebbian_mult
+* =============================================================================
+*
+* Generates a current proportional to Vpre × Vpost (one-quadrant).
+* MN7 (tail): gate = Vpost → I_tail ∝ (Vpost − Vth)²  (post-synaptic rate).
+* MN5/MN6 (diff pair): single-ended input Vpre modulates current split.
+* MPH1/MPH2 (PMOS mirror load): single-ended output I_out at port i_out.
+* Output I_out ≈ gm7 · Vpost · (Vpre − Vcm) / 2  for small signals.
+*
+* For full four-quadrant multiplication (LTP and LTD) replace with a
+* Gilbert cell (cross-coupled differential pairs with two tail transistors).
+*
+* Ports:
+*   i_out   Hebbian update current output  → connect to mac_cell iwrite
+*   v_pre   pre-synaptic voltage           ← input x_in (0–1.8 V)
+*   v_post  post-synaptic voltage          ← hidden state z (0–1.8 V)
+*   vcm     common-mode reference          ← typically 0.9 V
+*   vdd     1.8 V supply
+*   vss     0 V ground
+* -----------------------------------------------------------------------------
+.subckt hebbian_mult i_out v_pre v_post vcm vdd vss
+
+* PMOS current mirror load
+XMPH1 nh1   nh1   vdd vdd sky130_fd_pr__pfet_01v8 w=2 l=0.35
+XMPH2 i_out nh1   vdd vdd sky130_fd_pr__pfet_01v8 w=2 l=0.35
+
+* NMOS differential pair: Vpre is the single-ended input; Vcm on inv. input
+XMN5 nh1   v_pre ntailh vss sky130_fd_pr__nfet_01v8 w=2 l=0.35
+XMN6 i_out vcm   ntailh vss sky130_fd_pr__nfet_01v8 w=2 l=0.35
+
+* Tail transistor: Vpost sets tail current (learning rate × post activity)
+XMN7 ntailh v_post vss vss sky130_fd_pr__nfet_01v8 w=1 l=1
+
+.ends hebbian_mult
+
+
+* =============================================================================
+* Subcircuit: current_sub
+* =============================================================================
+*
+* Current-mode subtractor:  I_err = I_actual − I_pred
+*
+* PMOS current mirror (MPS1/MPS2) copies I_actual to the output node i_err.
+* I_pred is connected externally as a current-sinking load on i_err.
+* Net current at i_err:  I_err = I_MPS2 − I_pred = I_actual − I_pred.
+*
+* For I_err > 0 (actual > predicted): i_err node pulled toward VDD.
+* For I_err < 0 (actual < predicted): i_err node pulled toward VSS.
+* A high-impedance load on i_err (e.g. 100 kΩ) converts to voltage for
+* the precision_gate comparator input.
+* V3 I_bias floor: precision_gate adds XMFLOOR (W=0.5µm, same Vpi bias) to i_in,
+* guaranteeing a minimum sourcing current and preventing hard 0 V clamp when
+* XMPRED > I_MPG2 + I_XMPS2.  See precision_gate subcircuit for sizing details.
+*
+* Ports:
+*   i_actual  actual input current node    ← connect to input signal (KCL bus)
+*   i_pred    predicted current node       ← connect to mac_cell iout (bus)
+*   i_err     error output node            → to precision_gate i_in
+*   vdd       1.8 V supply
+*   vss       0 V ground
+*
+* §25 I_bias note: a bias current at i_actual is NOT implemented here.
+*   The KCL bus (iout_row) is the open-loop output of the PMOS-load diff amp —
+*   high-impedance, set by current mirror balance.  Any net sourcing current causes
+*   MP2 to enter linear region and rails V(iout) toward VDD (verified §49).
+*   Correct placement: inside mac_cell (a small tail-transistor floor that keeps
+*   I_tail > 0 even at Vw = 0), or a PMOS in the row-level bias network (§49).
+* -----------------------------------------------------------------------------
+.subckt current_sub i_actual i_pred i_err vdd vss r_err=100k
+
+* PMOS mirror: mirrors I_actual to the i_err output node.
+* L=2 for lower channel-length modulation (better mirror accuracy).
+* At Vsg≈0.9V sky130 long-channel PMOS: I ≈ kp/2 × (W/L) × Vov² ≈ 10 µA (W=4/L=2).
+XMPS1 i_actual i_actual vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=2
+XMPS2 i_err    i_actual vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=2
+
+* i_pred is the external prediction sink.  It connects to i_err internally so
+* that the layer_link XMPRED drains from the same node as XMPS2, completing
+* the KCL subtraction:  I_net = I_MPS2 − I_pred = I_actual − I_pred.
+Vpred_shunt i_pred i_err DC 0
+
+* High-impedance load: converts net error current to a voltage.
+* r_err must scale as 100kΩ×(4/N_cols) to maintain τ_KCL=28ns invariant (§40.5/§45).
+* Companion scaling: precision_gate w_mpg = 2µm×(N_cols/4) to maintain V_trip≈VDD/2.
+Rz i_err vss {r_err}
+
+.ends current_sub
+
+
+* =============================================================================
+* Subcircuit: precision_gate
+* =============================================================================
+*
+* Propagates error to the output only when |I_err| exceeds precision π.
+*
+* The precision threshold current I_pi is set by a learnable weight
+* voltage Vpi on a capacitor (same structure as mac_cell Cw).
+* MPG1/MPG2 mirror I_pi; the mirrored current is compared against I_err
+* at node ncomp.  The voltage at ncomp drives a CMOS inverter chain whose
+* output gates an NMOS current switch MNG_sw.
+*
+* Note: this implementation uses a simple open-loop comparator.
+* A production design should use a StrongARM latch or equivalent
+* regenerative comparator for rail-to-rail, offset-corrected switching.
+* The Sky130 PDK includes comparator hard IP in sky130_fd_sc_hd.
+*
+* Ports:
+*   i_in      error current input          ← from current_sub i_err
+*   vpi       precision threshold voltage  ← learnable weight (cap voltage)
+*   i_out     gated output current         → hebbian_mult / inter-chip boundary
+*   ierr_dig  digital error flag           → digital hebb_ctrl ierr[r] input
+*             HIGH  when error > threshold (update fires)
+*             LOW   when error < threshold (update suppressed)
+*             Rail-to-rail CMOS level; connect directly to digital domain.
+*   vdd       1.8 V supply
+*   vss       0 V ground
+* -----------------------------------------------------------------------------
+.subckt precision_gate i_in vpi i_out ierr_dig vdd vss w_mpg=2 w_floor=0.5
+
+* Threshold current mirror: MPG1 diode-connected at nvpi (forced to vpi via
+* Vpi_gate 0V source); MPG2 mirrors I_pi to i_in (the comparator node).
+* i_in IS the comparator node — error current from current_sub.Rz sinks here,
+* XMPRED (from layer_link) sinks here, MPG2 and XMFLOOR source here.
+* i_in HIGH (> VDD/2): I_sources > I_sinks → inverter LOW → ierr_dig LOW (suppress).
+* i_in LOW  (< VDD/2): I_sinks  > I_sources → inverter HIGH → ierr_dig HIGH (fire).
+* w_mpg scales as 2µm×(N_cols/4) alongside r_err to maintain V_trip=I_MPG2×r_err≈VDD/2.
+XMPG1 nvpi  nvpi  vdd vdd sky130_fd_pr__pfet_01v8 w={w_mpg} l=0.35
+XMPG2 i_in  nvpi  vdd vdd sky130_fd_pr__pfet_01v8 w={w_mpg} l=0.35
+
+* V3 I_bias floor: small PMOS, same Vpi bias, fixed W=w_floor.
+* Guarantees i_in > 0 V even when XMPRED overwhelms I_MPG2 + I_XMPS2.
+* I_floor = I_ref × (w_floor/w_mpg_ref).  With w_floor=0.5µm, w_mpg_ref=2µm,
+* I_ref=11.35µA (measured, 4×4 testbench): I_floor ≈ 2.8 µA.
+* V_floor_min = I_floor × R_err: ~284 mV at R_err=100kΩ (N_cols=4),
+*                                  ~35  mV at R_err=12.5kΩ (N_cols=32),
+*                                  ~17  mV at R_err=6.25kΩ (N_cols=64).
+* Floor is small relative to VDD/2=0.9 V at production scale.
+XMFLOOR i_in  nvpi  vdd vdd sky130_fd_pr__pfet_01v8 w={w_floor} l=0.35
+
+* Vpi_gate forces nvpi = vpi (0V source lets ngspice measure i(Vpi_gate))
+Vpi_gate nvpi vpi DC 0
+
+* CMOS inverter: converts V(i_in) to digital ierr_dig
+XMINVp ierr_dig i_in vdd vdd sky130_fd_pr__pfet_01v8 w=2 l=0.15
+XMINVn ierr_dig i_in vss vss sky130_fd_pr__nfet_01v8 w=1 l=0.15
+
+* Output current switch: passes error when enabled
+XMNG_sw i_out ierr_dig vss vss sky130_fd_pr__nfet_01v8 w=4 l=0.35
+
+* Bleeder prevents i_out from floating when MNG_sw is off
+Rout_bleed i_out vss 1000meg
+
+.ends precision_gate
+
+
+* =============================================================================
+* End of library
+* =============================================================================

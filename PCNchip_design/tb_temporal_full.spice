@@ -1,0 +1,277 @@
+* =============================================================================
+* tb_temporal_full.spice — Full Temporal Reuse Testbench with inp_dac
+* Generated: 2026-06-12
+*
+* Extends tb_temporal_reuse.spice by replacing the ideal voltage source
+* (Vinp_src) with the actual inp_dac R-2R circuit.  This closes the
+* activation input path: the same DAC architecture that loads weights also
+* drives inp, so both halves of the temporal round-trip use real analog
+* circuits rather than ideal sources.
+*
+* The activation round-trip in temporal mode:
+*   V(iout) → ADC → act_SRAM → inp_dac → V(inp_node) → V(iout_next_VL)
+*   ↑ ana   ↑ dig  ↑ dig      ↑ ana     ↑ ana          ↑ ana
+*
+* This testbench covers the analog half: inp_dac drives V(inp_node) for
+* three virtual layers.  The ADC and SRAM are digital blocks (tested in
+* tb_sar_adc.v).  Activation codes are pre-computed from tb_temporal_reuse
+* and hard-coded here.
+*
+* Activation code mapping (Vref=VDD=1.8 V, code 128 → Vcm=0.900 V):
+*   All three VLs use the same balanced activation code 128 (0x80=0.900V)
+*   during normal compute.  The gain window (t=200–219 ns) steps to code 134
+*   (0x86 → 0.942 V, +42 mV from Vcm) to measure the OTA small-signal gain
+*   driven via DAC rather than an ideal source.
+*
+* Weight words (same as tb_temporal_reuse.spice):
+*   VL0: word A = 0x6B (107) → Vw = 0.752 V
+*   VL1: word B = 0x80 (128) → Vw = 0.900 V
+*   VL2: word C = 0xC0 (192) → Vw = 1.350 V
+*
+* Tests:
+*   T1  — VL0 V(iout) in valid range [0.30, 1.50 V]  (same circuit as T1 in
+*          tb_temporal_reuse; any deviation is due to inp_dac vs ideal source)
+*   T2  — VL1 V(iout) in valid range
+*   T3  — VL2 V(iout) in valid range
+*   T4  — OTA gain ≥ 0.05 V/V with inp driven by inp_dac (vs ideal source)
+*   T5  — inp_dac accuracy at code 128: |V(inp) − 0.900 V| < 1 LSB = 7 mV
+*   T6  — inp_dac accuracy at code 134: |V(inp) − 0.942 V| < 1 LSB = 7 mV
+*          (verifies DAC linearity over the gain-step range)
+* =============================================================================
+
+.title PCN Temporal Reuse — Full Circuit (inp_dac + weight_dac + mac_cell)
+
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+.include "pcn_mac_cell.spice"
+.include "weight_dac.spice"
+.include "inp_dac.spice"
+
+.options RELTOL=1e-3 ABSTOL=1e-12 VNTOL=1e-6 GMIN=1e-10 ITL1=200 ITL4=100
+
+* ── Supplies ───────────────────────────────────────────────────────────────────
+Vvdd     vdd     0  DC 1.8
+Vvss     vss     0  DC 0
+Vref     vref    0  DC 1.8
+Vcm      vcm     0  DC 0.9
+
+* ── MAC cell under test ────────────────────────────────────────────────────────
+* inp = inp_node (driven by inp_dac; replaces ideal Vinp_src)
+* inn = vcm      (fixed 0.9 V reference)
+* iwrite = vdac_w (weight DAC output, gated by we_w onto Cw via CMOS TG)
+Xcell  nc_iout  inp_node  vcm  vw  vdac_w  we_w  vdd  vss  mac_cell
+Rload  nc_iout  vdd  100k
+
+* ── Weight DAC (R-2R, 8-bit, drives Vw via CMOS TG) ──────────────────────────
+Xdac_w  vdd vss vref  bw7 bw6 bw5 bw4 bw3 bw2 bw1 bw0  vdac_w  weight_dac
+
+* ── Input activation DAC (R-2R, 8-bit, drives inp_node directly) ─────────────
+* Vref=VDD=1.8V → code 128 = 0.900 V = Vcm; code 134 = 0.942 V (gain window).
+Xdac_i  vdd vss vref  bi7 bi6 bi5 bi4 bi3 bi2 bi1 bi0  inp_node  inp_dac
+
+* Scaled leakage resistor (same as tb_sram_reload / tb_temporal_reuse)
+R_leak  vw  vss  1000meg
+
+* ── Nodesets ───────────────────────────────────────────────────────────────────
+.nodeset V(vw)=0.750  V(vdac_w)=0.752  V(nc_iout)=0.883  V(inp_node)=0.900
+
+
+* =============================================================================
+* WEIGHT DAC BIT SOURCES — same 3-VL sequence as tb_temporal_reuse.spice
+* =============================================================================
+*
+* Weight write windows (WE=1, 80 ns each):
+*   VL0:  10 –  90 ns   word A = 0x6B (107) → Vdac_w = 0.7523 V
+*   VL1: 300 – 380 ns   word B = 0x80 (128) → Vdac_w = 0.9000 V
+*   VL2: 600 – 680 ns   word C = 0xC0 (192) → Vdac_w = 1.3500 V
+*
+* Word A = 0x6B: bw7=0 bw6=1 bw5=1 bw4=0 bw3=1 bw2=0 bw1=1 bw0=1
+* Word B = 0x80: bw7=1 bw6=0 bw5=0 bw4=0 bw3=0 bw2=0 bw1=0 bw0=0
+* Word C = 0xC0: bw7=1 bw6=1 bw5=0 bw4=0 bw3=0 bw2=0 bw1=0 bw0=0
+*
+* Bit transitions 5 ns before each WE rising edge (1 ns ramp).
+* A→B at 294–295 ns.  B→C at 594–595 ns.
+
+Vbw7  bw7  0  PWL(0n 0   294n 0   295n 1.8   900n 1.8)
+Vbw6  bw6  0  PWL(0n 1.8  294n 1.8  295n 0   594n 0   595n 1.8  900n 1.8)
+Vbw5  bw5  0  PWL(0n 1.8  294n 1.8  295n 0   900n 0)
+Vbw4  bw4  0  DC 0
+Vbw3  bw3  0  PWL(0n 1.8  294n 1.8  295n 0   900n 0)
+Vbw2  bw2  0  DC 0
+Vbw1  bw1  0  PWL(0n 1.8  294n 1.8  295n 0   900n 0)
+Vbw0  bw0  0  PWL(0n 1.8  294n 1.8  295n 0   900n 0)
+
+* ── Weight write enable ────────────────────────────────────────────────────────
+Vwe_w  we_w  0  PWL(0n 0
++    9n 0   10n 1.8   89n 1.8   90n 0
++  299n 0  300n 1.8  379n 1.8  380n 0
++  599n 0  600n 1.8  679n 1.8  680n 0
++  900n 0)
+
+
+* =============================================================================
+* INP DAC BIT SOURCES — code 128 (0x80=0.900V) for compute; 134 (0x86=0.942V)
+* during gain window t=200–219 ns
+* =============================================================================
+*
+* Code 128 = 0x80: bi7=1, bi6..bi0=0   → Vinp = 128×1.8/256 = 0.9000 V
+* Code 134 = 0x86: bi7=1, bi6=0, bi5=0, bi4=0, bi3=0, bi2=1, bi1=1, bi0=0
+*                                        → Vinp = 134×1.8/256 = 0.9422 V (+42 mV)
+*
+* Gain window: t=200–219 ns (same window as tb_temporal_reuse Vinp_src step).
+* Bit transitions: 1 ns ramp at 200 ns (up) and 219 ns (down).
+* bi7 stays HIGH throughout (MSB=1 for both codes).
+* bi2 and bi1 rise to 1.8 V at 200 ns, fall at 219 ns.
+* All other inp bits remain 0 for the full simulation.
+
+Vbi7  bi7  0  DC 1.8
+Vbi6  bi6  0  DC 0
+Vbi5  bi5  0  DC 0
+Vbi4  bi4  0  DC 0
+Vbi3  bi3  0  DC 0
+Vbi2  bi2  0  PWL(0n 0  199n 0  200n 1.8  219n 1.8  220n 0  900n 0)
+Vbi1  bi1  0  PWL(0n 0  199n 0  200n 1.8  219n 1.8  220n 0  900n 0)
+Vbi0  bi0  0  DC 0
+
+
+* =============================================================================
+.control
+
+  set filetype = ascii
+
+  echo ""
+  echo "======================================================"
+  echo " tb_temporal_full: 3-VL temporal reuse with inp_dac"
+  echo " inp_dac: code 128 = Vcm = 0.900 V (compute phases)"
+  echo "          code 134 = 0.942 V        (gain window)"
+  echo "======================================================"
+
+  tran 2n 900n
+
+  * ── Weight and activation measurements ──────────────────────────────────────
+  * Taken well after weight write settles and inp_dac is stable.
+
+  * VL0: WE falls at 90 ns; measure at 180 ns (inp_dac at code 128 = 0.900 V)
+  meas tran Viout_VL0    FIND V(nc_iout)   AT=180n
+  meas tran Vvw_VL0      FIND V(vw)        AT=180n
+  meas tran Vinp_nom     FIND V(inp_node)  AT=180n
+
+  * VL1: measure at 580 ns (inp_dac still code 128)
+  meas tran Viout_VL1    FIND V(nc_iout)   AT=580n
+  meas tran Vvw_VL1      FIND V(vw)        AT=580n
+
+  * VL2: measure at 880 ns (inp_dac still code 128)
+  meas tran Viout_VL2    FIND V(nc_iout)   AT=880n
+  meas tran Vvw_VL2      FIND V(vw)        AT=880n
+
+  * Gain window (t=200–219 ns): inp_dac steps to code 134 = 0.942 V
+  * Balanced at 180 ns (code 128); perturbed at 210 ns (code 134).
+  * Same V(vw)=0.752 V throughout (WE low; weight held on Cw).
+  meas tran Viout_bal    FIND V(nc_iout)   AT=180n
+  meas tran Viout_pert   FIND V(nc_iout)   AT=210n
+  meas tran Vinp_step    FIND V(inp_node)  AT=210n
+
+  * ── T1–T3: V(iout) valid range ─────────────────────────────────────────────
+  echo ""
+  echo "  T1–T3: V(iout) at each virtual layer"
+  echo "  Valid range: 0.30 V – 1.50 V"
+  echo "  ------------------------------------------------------------------"
+
+  echo ""
+  echo "  --- VL0: Vw = word A (0x6B=107) → target 0.7523 V ---"
+  echo "  V(vw)   = " $&Vvw_VL0   "V"
+  echo "  V(iout) = " $&Viout_VL0 "V"
+  if Viout_VL0 > 0.30
+    if Viout_VL0 < 1.50
+      echo "  PASS T1: V(iout) in valid range"
+    else
+      echo "  FAIL T1: V(iout) saturated toward VDD"
+    end
+  else
+    echo "  FAIL T1: V(iout) saturated toward VSS"
+  end
+
+  echo ""
+  echo "  --- VL1: Vw = word B (0x80=128) → target 0.9000 V ---"
+  echo "  V(vw)   = " $&Vvw_VL1   "V"
+  echo "  V(iout) = " $&Viout_VL1 "V"
+  if Viout_VL1 > 0.30
+    if Viout_VL1 < 1.50
+      echo "  PASS T2: V(iout) in valid range"
+    else
+      echo "  FAIL T2: V(iout) saturated toward VDD"
+    end
+  else
+    echo "  FAIL T2: V(iout) saturated toward VSS"
+  end
+
+  echo ""
+  echo "  --- VL2: Vw = word C (0xC0=192) → target 1.3500 V ---"
+  echo "  V(vw)   = " $&Vvw_VL2   "V"
+  echo "  V(iout) = " $&Viout_VL2 "V"
+  if Viout_VL2 > 0.30
+    if Viout_VL2 < 1.50
+      echo "  PASS T3: V(iout) in valid range"
+    else
+      echo "  FAIL T3: V(iout) saturated toward VDD"
+    end
+  else
+    echo "  FAIL T3: V(iout) saturated toward VSS"
+  end
+
+  * ── T4: OTA gain ─────────────────────────────────────────────────────────────
+  echo ""
+  echo "  T4: OTA gain — inp_dac code step 128→134 (+42 mV)"
+  echo "  ------------------------------------------------------------------"
+  echo "  V(iout) at code 128 (t=180 ns): " $&Viout_bal  "V"
+  echo "  V(iout) at code 134 (t=210 ns): " $&Viout_pert "V"
+  let gain = (Viout_pert - Viout_bal) / 0.042
+  echo "  Gain = dV(iout)/d(inp) = " $&gain "V/V"
+  echo "  (reference from tb_temporal_reuse: ~6.82 V/V)"
+  if gain > 0.05
+    echo "  PASS T4: gain meaningful (> 0.05 V/V)"
+  else
+    echo "  FAIL T4: gain too low (" $&gain "V/V)"
+  end
+
+  * ── T5–T6: inp_dac accuracy ──────────────────────────────────────────────────
+  echo ""
+  echo "  T5–T6: inp_dac output accuracy"
+  echo "  1 LSB = 1.8/256 = 7.03 mV"
+  echo "  ------------------------------------------------------------------"
+
+  echo "  V(inp_node) at code 128 (t=180 ns): " $&Vinp_nom  "V  (target 0.9000 V)"
+  let err_nom = Vinp_nom - 0.900
+  if err_nom < 0
+    let err_nom = 0 - err_nom
+  end
+  if err_nom < 0.00703
+    echo "  PASS T5: error " $&err_nom " V < 1 LSB"
+  else
+    echo "  FAIL T5: error " $&err_nom " V >= 1 LSB"
+  end
+
+  echo ""
+  echo "  V(inp_node) at code 134 (t=210 ns): " $&Vinp_step "V  (target 0.9422 V)"
+  let err_step = Vinp_step - 0.9422
+  if err_step < 0
+    let err_step = 0 - err_step
+  end
+  if err_step < 0.00703
+    echo "  PASS T6: error " $&err_step " V < 1 LSB"
+  else
+    echo "  FAIL T6: error " $&err_step " V >= 1 LSB"
+  end
+
+  write  output/tb_temporal_full.raw
+  wrdata output/tb_temporal_full.csv V(nc_iout) V(inp_node) V(vw) V(vdac_w) V(we_w)
+  echo ""
+  echo "  Saved: output/tb_temporal_full.raw  output/tb_temporal_full.csv"
+
+  echo ""
+  echo "======================================================"
+  echo " Full temporal testbench complete."
+  echo "======================================================"
+
+  quit
+.endc
+.end

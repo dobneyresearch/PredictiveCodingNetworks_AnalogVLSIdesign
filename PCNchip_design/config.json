@@ -1,0 +1,23 @@
+{
+    "DESIGN_NAME": "pcn_digital_top",
+    "VERILOG_FILES": [
+        "dir::rtl/pcn_digital_top.v",
+        "dir::rtl/pcn_wb_regs.v",
+        "dir::rtl/weight_fsm.v",
+        "dir::rtl/hebb_ctrl.v",
+        "dir::rtl/power_fsm.v",
+        "dir::rtl/sram_if.v"
+    ],
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 20,
+    "FP_CORE_UTIL": 40,
+    "FP_ASPECT_RATIO": 1,
+    "PL_TARGET_DENSITY": 0.45,
+    "SYNTH_MAX_FANOUT": 8,
+    "ROUTING_CORES": 8,
+    "GLB_RESIZER_TIMING_OPTIMIZATIONS": true,
+    "DIODE_INSERTION_STRATEGY": 4,
+    "RUN_KLAYOUT_DRC": true,
+    "RUN_LVS": true,
+    "MACRO_PLACEMENT_CFG": "dir::macro_placement.cfg"
+}

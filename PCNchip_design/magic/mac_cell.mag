@@ -1,0 +1,51 @@
+magic
+tech sky130A
+magscale 1 2
+timestamp 1749840000
+<< boundary >>
+rect 0 0 3200 2200
+<< nwell >>
+rect 0 1400 3200 2200
+<< psd >>
+rect 20 20 120 100
+<< nsd >>
+rect 3080 2100 3180 2180
+<< ndiff >>
+rect 200 120 1200 620
+rect 1300 700 2220 900
+<< pdiff >>
+rect 200 1500 1200 1900
+rect 1300 1500 2000 1900
+rect 2100 1500 2400 1700
+rect 2700 700 2900 800
+<< poly >>
+rect 390 94 460 646
+rect 590 94 660 646
+rect 790 94 860 646
+rect 990 94 1060 646
+rect 1420 674 1490 926
+rect 1620 674 1690 926
+rect 1820 674 1890 926
+rect 2020 674 2090 926
+rect 420 1474 490 1926
+rect 700 1474 770 1926
+rect 1420 1474 1490 1926
+rect 1700 1474 1770 1926
+rect 2120 1474 2190 1726
+rect 2700 674 2800 826
+<< locali >>
+rect 0 0 3200 20
+rect 0 2180 3200 2200
+rect 20 20 120 100
+rect 3080 2100 3180 2180
+<< labels >>
+rlabel locali s 0 0 3200 20 1 VSS
+rlabel locali s 0 2180 3200 2200 3 VDD
+rlabel ndiff s 1100 780 1200 880 1 IOUT
+rlabel poly s 1420 940 1490 980 3 INP
+rlabel poly s 1820 940 1890 980 3 INN
+rlabel poly s 390 660 460 700 3 VW
+rlabel locali s 2700 840 2900 880 1 IWRITE
+rlabel poly s 2700 840 2800 880 3 WE
+rlabel locali s 0 2180 3200 2200 3 VDD
+<< end >>

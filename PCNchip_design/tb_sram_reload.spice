@@ -1,0 +1,264 @@
+* =============================================================================
+* tb_sram_reload.spice — SRAM Save/Load Path Verification
+* Generated: 2026-06-12
+*
+* Verifies the full weight save/load path:
+*   8-bit SRAM word → weight_dac (R-2R) → vdac_out → MN4 (gate=we) → Cw
+*
+* Write mechanism: MN4 is a pass transistor (NMOS, W=0.5/L=0.5µm).
+*   With WE=1.8V: MN4 conducts; V(vw) → V(vdac_out). No source-follower offset.
+*   τ = R_dac_thevenin × Cw ≈ 25kΩ × 200fF = 5ns; WE pulse = 80ns = 16τ (full settle).
+*   With WE=0V:  MN4 off; Cw isolated; V(vw) held by Cw.
+*
+* SRAM model: each bit modelled as a pulsed voltage source (0V or 1.8V).
+*   Real chip: weight_fsm drives these lines via row/col address decode.
+*
+* Tests:
+*   T1 — Three sequential DAC→Vw writes (words A, B, C at different codes).
+*         PASS criterion: |V(vw) − V_ideal| < 1.5 LSB (11mV) at end of each pulse.
+*   T2 — Leakage and recovery: 200µs hold with scaled leakage resistor (1GΩ),
+*         then reload word B. Scaled model: R_leak=1GΩ → τ=200µs (1000× faster
+*         than real MN4 BSIM4 off-state ~1TΩ, τ_real≈200s). Demonstrates concept.
+*         PASS: Vw drifts >20mV during hold; recovers to within 11mV after reload.
+*   T3 — DAC output linearity: V(vdac_out) measured at 5 code points while WE=0.
+*         Confirms R-2R converts SRAM bits to correct voltage before the write path.
+*
+* Word encoding used:
+*   Word A = 0x6B (107): b7=0 b6=1 b5=1 b4=0 b3=1 b2=0 b1=1 b0=1 → 1.8×107/256 = 0.7523V
+*   Word B = 0x80 (128): b7=1 b6=0 b5=0 b4=0 b3=0 b2=0 b1=0 b0=0 → 1.8×128/256 = 0.9000V
+*   Word C = 0x40  (64): b7=0 b6=1 b5=0 b4=0 b3=0 b2=0 b1=0 b0=0 → 1.8×64/256  = 0.4500V
+* =============================================================================
+
+.title PCN SRAM Save/Load Verification
+
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+.include "pcn_mac_cell.spice"
+.include "weight_dac.spice"
+
+.options RELTOL=1e-3 ABSTOL=1e-12 VNTOL=1e-6 GMIN=1e-10 ITL1=200 ITL4=100
+
+* ── Supplies ──────────────────────────────────────────────────────────────────
+Vvdd     vdd     0  DC 1.8
+Vvss     vss     0  DC 0
+* DAC full-scale reference = VDD; LSB = 1800mV/256 = 7mV
+Vref  vref 0  DC 1.8
+
+* ── Common-mode (holds MAC cell OTA in a valid, balanced operating point) ─────
+Vcm   vcm  0  DC 0.9
+
+* ── MAC cell under test ───────────────────────────────────────────────────────
+* inp=inn=Vcm: balanced, keeps OTA from railing while Vw sweeps 0.45–0.90V
+* iwrite connected to DAC output (the write source under test)
+* vw is the monitored weight-cap node; Cw=200fF is internal to mac_cell
+* iout weakly loaded (not under test; no KCL bus present here)
+Xcell  nc_iout  vcm  vcm  vw  vdac_out  we  vdd  vss  mac_cell
+Rload  nc_iout  vdd  100k
+
+* ── Weight DAC ────────────────────────────────────────────────────────────────
+* Port map (from weight_dac.spice): vdd vss vref b7 b6 b5 b4 b3 b2 b1 b0 vdac
+Xdac  vdd  vss  vref  b7 b6 b5 b4 b3 b2 b1 b0  vdac_out  weight_dac
+
+* ── Scaled leakage resistor (T2 leakage demonstration) ───────────────────────
+* Real MN4 off-state leakage (BSIM4, W=0.5/L=0.5, Vgs=0, Vds≈0.7V, 27°C): ~5–10 fA
+*   → R_eff ≈ 150GΩ → τ_real = 150GΩ × 200fF ≈ 30s → not simulatable.
+* Scaled model for testbench: R_leak=1GΩ → τ_scaled = 1GΩ × 200fF = 200µs (1000× faster).
+* Effect during 80ns WE pulse: I_leak = Vw/R_leak ≈ 0.9V/1GΩ = 0.9nA;
+*   DAC drives ~30µA — leakage draws 0.003% of write current. Negligible during writes.
+R_leak  vw  vss  1000meg
+
+* ── SRAM word: 8-bit word as pulsed voltage sources ─────────────────────────
+*
+* Write windows (WE asserted 80ns each):
+*   Window 1:  10ns –  90ns   Word A = 0x6B → Vdac = 0.7523V
+*   Window 2: 115ns – 195ns   Word B = 0x80 → Vdac = 0.9000V
+*   Window 3: 220ns – 300ns   Word C = 0x40 → Vdac = 0.4500V
+*   Reload:  200100ns–200180ns Word B (reload after leakage hold)
+*
+* Bit transitions occur 5ns before each new WE rising edge.
+* Transitions use 1ns linear ramps.
+*
+*   b7: A=0  B=1  C=0  (hold_C=0)  reload_B=1
+Vb7  b7  0  PWL(0n 0
++  109n 0  110n 1.8
++  214n 1.8  215n 0
++  200094n 0  200095n 1.8  200200n 1.8)
+
+*   b6: A=1  B=0  C=1  (hold_C=1)  reload_B=0
+Vb6  b6  0  PWL(0n 1.8
++  109n 1.8  110n 0
++  214n 0  215n 1.8
++  200094n 1.8  200095n 0  200200n 0)
+
+*   b5: A=1  B=0  C=0  (hold_C=0)  reload_B=0  — one transition only
+Vb5  b5  0  PWL(0n 1.8  109n 1.8  110n 0  200200n 0)
+
+*   b4: always 0
+Vb4  b4  0  DC 0
+
+*   b3: A=1  B=0  C=0  — same as b5
+Vb3  b3  0  PWL(0n 1.8  109n 1.8  110n 0  200200n 0)
+
+*   b2: always 0
+Vb2  b2  0  DC 0
+
+*   b1: A=1  B=0  C=0  — same as b5
+Vb1  b1  0  PWL(0n 1.8  109n 1.8  110n 0  200200n 0)
+
+*   b0: A=1  B=0  C=0  — same as b5
+Vb0  b0  0  PWL(0n 1.8  109n 1.8  110n 0  200200n 0)
+
+* ── Write enable pulse train ──────────────────────────────────────────────────
+* 80ns pulses, 1ns rise/fall, at each write window
+Vwe  we  0  PWL(0n 0
++   9n 0   10n 1.8   89n 1.8   90n 0
++ 114n 0  115n 1.8  194n 1.8  195n 0
++ 219n 0  220n 1.8  299n 1.8  300n 0
++ 200099n 0  200100n 1.8  200179n 1.8  200180n 0
++ 200200n 0)
+
+* ── Nodesets — convergence seeds ──────────────────────────────────────────────
+* vw starts at word A target (0.75V) — DC OP with word A bits and WE=0
+.nodeset V(vw)=0.750  V(vdac_out)=0.752  V(nc_iout)=0.883
+
+* =============================================================================
+.control
+
+  set filetype = ascii
+
+  * ──────────────────────────────────────────────────────────────────────────
+  * T1 + T2: single transient covering all three writes, hold, and reload
+  * 200.2µs total: 0–300ns (T1 writes), 300ns–200.1µs (T2 hold), 200.1–200.2µs (reload)
+  * ──────────────────────────────────────────────────────────────────────────
+  echo ""
+  echo "======================================================"
+  echo " T1: Sequential SRAM→DAC→Vw writes"
+  echo "======================================================"
+
+  tran 2n 200.2u
+
+  * ── T1 measurements ────────────────────────────────────────────────────────
+  * DAC output before each write window (WE=0, DAC settled to new word)
+  meas tran Vdac_A_pre   FIND V(vdac_out)  AT=5n
+  meas tran Vdac_B_pre   FIND V(vdac_out)  AT=112n
+  meas tran Vdac_C_pre   FIND V(vdac_out)  AT=217n
+
+  * Vw at end of each write pulse (just before WE falls)
+  meas tran Vw_A         FIND V(vw)        AT=89n
+  meas tran Vw_B         FIND V(vw)        AT=194n
+  meas tran Vw_C         FIND V(vw)        AT=299n
+
+  * ── T2 measurements ────────────────────────────────────────────────────────
+  * Vw at end of 200µs hold (just before reload WE pulse)
+  meas tran Vw_hold_end  FIND V(vw)        AT=200099n
+  * Vw at end of reload pulse
+  meas tran Vw_recov     FIND V(vw)        AT=200179n
+
+  * ── T3 DAC linearity measurements (WE=0 windows, DAC output only) ──────────
+  * Middle of first inter-window gap (90-114ns): word B bits settled, no write
+  meas tran Vdac_B_idle  FIND V(vdac_out)  AT=104n
+  * Middle of second inter-window gap (195-219ns): word C bits settled
+  meas tran Vdac_C_idle  FIND V(vdac_out)  AT=208n
+
+  * ── T1 reporting ───────────────────────────────────────────────────────────
+  echo ""
+  echo "  DAC output (WE=0, confirming R-2R for each word before write):"
+  echo "  V(vdac_out) word A pre-write  =  " $&Vdac_A_pre  "V  (ideal: 0.7523V)"
+  echo "  V(vdac_out) word B pre-write  =  " $&Vdac_B_pre  "V  (ideal: 0.9000V)"
+  echo "  V(vdac_out) word C pre-write  =  " $&Vdac_C_pre  "V  (ideal: 0.4500V)"
+  echo ""
+  echo "  Vw after write (BSIM4 MN4 pass transistor, 80ns WE pulse):"
+
+  echo "  --- Word A: 0x6B (107) → target 0.7523V ---"
+  echo "  V(vw) = " $&Vw_A
+  let err_A = abs(Vw_A - 0.7523)
+  if err_A < 0.011
+    echo "  PASS: within 1.5 LSB of target"
+  else
+    echo "  FAIL: error " $&err_A " V exceeds 1.5 LSB (11mV)"
+  end
+
+  echo ""
+  echo "  --- Word B: 0x80 (128) → target 0.9000V ---"
+  echo "  V(vw) = " $&Vw_B
+  let err_B = abs(Vw_B - 0.9000)
+  if err_B < 0.011
+    echo "  PASS: within 1.5 LSB of target"
+  else
+    echo "  FAIL: error " $&err_B " V exceeds 1.5 LSB"
+  end
+
+  echo ""
+  echo "  --- Word C: 0x40 (64) → target 0.4500V ---"
+  echo "  V(vw) = " $&Vw_C
+  let err_C = abs(Vw_C - 0.4500)
+  if err_C < 0.011
+    echo "  PASS: within 1.5 LSB of target"
+  else
+    echo "  FAIL: error " $&err_C " V exceeds 1.5 LSB"
+  end
+
+  echo ""
+  echo "======================================================"
+  echo " T2: Leakage and recovery (scaled model)"
+  echo "======================================================"
+  echo "  R_leak = 1 GΩ (scaled: τ=200µs, 1000× faster than real τ_real≈200s)"
+  echo "  Hold duration: 199.8µs ≈ 1 time constant"
+  echo "  Expected Vw at hold end: 0.4500 × exp(-1) ≈ 0.166V"
+  echo ""
+  echo "  V(vw) at end of hold (t=200.099µs): " $&Vw_hold_end "V"
+  let drift = Vw_C - Vw_hold_end
+  echo "  Drift from initial 0.450V: -" $&drift "V"
+  if drift > 0.020
+    echo "  PASS: leakage clearly visible (drift > 20mV)"
+  else
+    echo "  WARN: leakage not clearly visible"
+  end
+
+  echo ""
+  echo "  V(vw) after reload to Word B (t=200.179µs): " $&Vw_recov "V"
+  let err_recov = abs(Vw_recov - 0.9000)
+  if err_recov < 0.011
+    echo "  PASS: Vw recovered within 1.5 LSB of Word B target (0.9000V)"
+  else
+    echo "  FAIL: recovery error " $&err_recov " V exceeds 1.5 LSB"
+  end
+
+  echo ""
+  echo "======================================================"
+  echo " T3: DAC output linearity (spot-check, WE=0)"
+  echo "======================================================"
+  echo "  Measured during inter-window hold periods (no write active)"
+  echo "  V(vdac_out) word A (0x6B, t=5ns):   " $&Vdac_A_pre  "V  (ideal: 0.7523)"
+  echo "  V(vdac_out) word B (0x80, t=104ns):  " $&Vdac_B_idle "V  (ideal: 0.9000)"
+  echo "  V(vdac_out) word C (0x40, t=208ns):  " $&Vdac_C_idle "V  (ideal: 0.4500)"
+  let dac_err_A = abs(Vdac_A_pre  - 0.7523)
+  let dac_err_B = abs(Vdac_B_idle - 0.9000)
+  let dac_err_C = abs(Vdac_C_idle - 0.4500)
+  if dac_err_A < 0.004
+    echo "  PASS: Word A DAC error < 0.5 LSB"
+  else
+    echo "  FAIL: Word A DAC error " $&dac_err_A "V"
+  end
+  if dac_err_B < 0.004
+    echo "  PASS: Word B DAC error < 0.5 LSB"
+  else
+    echo "  FAIL: Word B DAC error " $&dac_err_B "V"
+  end
+  if dac_err_C < 0.004
+    echo "  PASS: Word C DAC error < 0.5 LSB"
+  else
+    echo "  FAIL: Word C DAC error " $&dac_err_C "V"
+  end
+
+  write  output/t1t2t3_sram_reload.raw
+  wrdata output/t1t2t3_sram_reload.csv V(vw) V(vdac_out) V(we) V(b7) V(b6)
+  echo "  Saved: output/t1t2t3_sram_reload.raw  output/t1t2t3_sram_reload.csv"
+
+  echo ""
+  echo "======================================================"
+  echo " Save/load verification complete."
+  echo "======================================================"
+
+  quit
+.endc
+.end

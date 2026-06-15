@@ -1,0 +1,51 @@
+v {xschem version=3.4.5 file_version=1.2}
+G {}
+K {}
+V {}
+S {}
+E {}
+** mac_cell symbol — 8-port: IOUT INP INN VW IWRITE WE VDD VSS
+L 4 -100 -200 100 -200 {}
+L 4 100 -200 100 200 {}
+L 4 100 200 -100 200 {}
+L 4 -100 200 -100 -200 {}
+** Port stubs
+L 4 -100 -160 -140 -160 {}
+L 4 -100  -80 -140  -80 {}
+L 4 -100   0  -140    0 {}
+L 4 -100   80 -140   80 {}
+L 4 -100  160 -140  160 {}
+L 4  100 -160  140 -160 {}
+L 4  100  -80  140  -80 {}
+L 4  100   80  140   80 {}
+** Port pins
+P 4 5 -140 -160 -130 -155 -130 -165 -140 -160 -140 -160 {}
+P 4 5 -140  -80 -130  -75 -130  -85 -140  -80 -140  -80 {}
+P 4 5 -140    0 -130    5 -130   -5 -140    0 -140    0 {}
+P 4 5 -140   80 -130   85 -130   75 -140   80 -140   80 {}
+P 4 5 -140  160 -130  165 -130  155 -140  160 -140  160 {}
+P 4 5  140 -160  130 -155  130 -165  140 -160  140 -160 {}
+P 4 5  140  -80  130  -75  130  -85  140  -80  140  -80 {}
+P 4 5  140   80  130   85  130   75  140   80  140   80 {}
+** Cell name label
+T {mac_cell} 0 0 0 0 0.3 0.3 {}
+** Port labels
+T {VDD}    -90 -175 0 0 0.2 0.2 {}
+T {INP}    -90  -95 0 0 0.2 0.2 {}
+T {INN}    -90  -15 0 0 0.2 0.2 {}
+T {VW}     -90   65 0 0 0.2 0.2 {}
+T {WE}     -90  145 0 0 0.2 0.2 {}
+T {IOUT}    55 -175 0 0 0.2 0.2 {}
+T {IWRITE}  55  -95 0 0 0.2 0.2 {}
+T {VSS}     55   65 0 0 0.2 0.2 {}
+** Attributes
+[
+port {VDD    dir=inout  order=6}
+port {INP    dir=input  order=1}
+port {INN    dir=input  order=2}
+port {VW     dir=inout  order=3}
+port {WE     dir=input  order=5}
+port {IOUT   dir=output order=0}
+port {IWRITE dir=input  order=4}
+port {VSS    dir=inout  order=7}
+]

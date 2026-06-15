@@ -1,0 +1,62 @@
+# OpenLane 2 configuration for pcn_digital_top
+# PCN chip — digital controller block
+# PDK: sky130A, SCL: sky130_fd_sc_hd
+
+DESIGN_NAME: pcn_digital_top
+VERILOG_FILES:
+  - dir::src/sram_blackbox.v
+  - dir::src/sram_if.v
+  - dir::src/act_sram.v
+  - dir::src/hebb_ctrl.v
+  - dir::src/power_fsm.v
+  - dir::src/pcn_wb_regs.v
+  - dir::src/weight_fsm.v
+  - dir::src/sar_adc.v
+  - dir::src/pcn_digital_top.v
+
+# Clock: clk at 50 MHz (20ns period — conservative for first run)
+CLOCK_PORT: clk
+CLOCK_PERIOD: 20
+
+# Default parameters match the testbench: 4 rows, 8 cols
+# These are elaborated at synthesis time via Yosys -D flags
+VERILOG_DEFINES:
+  - SYNTHESIS
+
+# SRAM macro: sky130_sram_1kbyte_1rw1r_8x1024_8
+# The LEF and lib are in libs.ref/sky130_sram_macros/
+EXTRA_LEFS:
+  - /home/saul/.volare/sky130A/libs.ref/sky130_sram_macros/lef/sky130_sram_1kbyte_1rw1r_8x1024_8.lef
+
+EXTRA_LIBS:
+  - /home/saul/.volare/sky130A/libs.ref/sky130_sram_macros/lib/sky130_sram_1kbyte_1rw1r_8x1024_8_TT_1p8V_25C.lib
+
+EXTRA_GDS_FILES:
+  - /home/saul/.volare/sky130A/libs.ref/sky130_sram_macros/gds/sky130_sram_1kbyte_1rw1r_8x1024_8.gds
+
+# Macro placement
+MACRO_PLACEMENT_CFG: dir::macro_placement.cfg
+
+# SRAM macro power connections: vccd1=VDD, vssd1=VSS (sky130 1.8V domain)
+PDN_MACRO_CONNECTIONS:
+  - ".*sram.* VPWR VGND vccd1 vssd1"
+
+# Floorplan
+FP_CORE_UTIL: 40
+FP_ASPECT_RATIO: 1
+
+# PDN
+FP_PDN_VOFFSET: 5
+FP_PDN_HOFFSET: 5
+FP_PDN_VWIDTH: 1.6
+FP_PDN_HWIDTH: 1.6
+FP_PDN_VPITCH: 30
+FP_PDN_HPITCH: 30
+
+# Max fanout for this process
+MAX_FANOUT_CONSTRAINT: 10
+
+# Technology overrides
+pdk::sky130*:
+  CLOCK_PERIOD: 20.0
+  FP_CORE_UTIL: 40

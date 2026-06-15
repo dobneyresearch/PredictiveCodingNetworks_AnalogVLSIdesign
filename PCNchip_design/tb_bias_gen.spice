@@ -1,0 +1,51 @@
+* =============================================================================
+* Bias Generator Standalone Testbench
+* File:      tb_bias_gen.spice
+* Analyses:  .op  (operating point — verify vbias_n, vcm, vpi)
+*            .dc  (VDD sweep 1.5–1.9V — check supply tracking)
+* =============================================================================
+.title bias_gen standalone verification
+
+.include "pcn_mac_cell.spice"
+.include "bias_gen.spice"
+
+* Sky130 model library  ($PDK_ROOT substituted by run_sim.sh or manually)
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+
+* Supply
+Vvdd vdd 0 DC 1.8
+Vvss vss 0 DC 0
+
+* DUT
+Xbias  vbias_n  vcm  vpi  vdd  vss  bias_gen
+
+* ── Analyses ─────────────────────────────────────────────────────────────────
+* Analysis 1: operating point at nominal VDD=1.8V
+* Analysis 2: VDD sweep 1.5→1.9V — verify supply tracking and vcm=VDD/2
+.dc Vvdd 1.5 1.9 0.01
+
+* ── Control block: run, print, save ─────────────────────────────────────────
+.control
+  * Operating point at VDD=1.8V
+  op
+  echo "=== bias_gen operating point (VDD=1.8V) ==="
+  print v(vbias_n)
+  print v(vcm)
+  print v(vpi)
+  print i(Vvdd)
+  echo "--- beta-multiplier internals ---"
+  print v(xbias.nbias_r)
+  print v(xbias.nr1)
+
+  * DC sweep for supply tracking
+  dc Vvdd 1.5 1.9 0.01
+  echo "=== VDD sweep complete ==="
+
+  * Write CSV: columns = vdd, vbias_n, vcm, vpi
+  set wr_vecnames
+  set wr_singlescale
+  wrdata output/bias_gen_vdd_sweep.csv v-sweep vbias_n vcm vpi
+  echo "  Sweep written to output/bias_gen_vdd_sweep.csv"
+.endc
+
+.end

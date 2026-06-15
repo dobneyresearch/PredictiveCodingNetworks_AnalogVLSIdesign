@@ -1,0 +1,126 @@
+* =============================================================================
+* PCN Module — Bias Generator
+* File:      bias_gen.spice
+* Simulator: ngspice 42+
+*
+* Self-biased beta-multiplier current reference + Vcm/Vpi voltage references.
+* Generates the stable infrastructure used by all analog blocks on the chip:
+*
+*   Vbias_n  = 0.760 V  — NMOS mirror gate rail (BSIM4 tt corner, VDD=1.8V, 27°C)
+*                        Drives XMTAIL (W=2/L=1) in layer_link → I_tail ≈ 9 µA.
+*                        Tracks VDD proportionally (resistor-divider style via
+*                        the MP1/MN1 left-branch balance; not bandgap stable).
+*                        To lower vbias_n: reduce MP1 W/L or increase MN1 W/L.
+*   Vcm      ≈ 0.9 V  — common-mode reference for all mac_cell inn ports
+*   Vpi      ≈ 0.65 V — precision gate threshold (adjustable via resistor trim)
+*
+* Circuit sections:
+*   Part A — beta-multiplier core (MP1/MP2, MN1/MN2, R1)
+*   Part B — Vcm and Vpi resistor divider (3-tap chain)
+*   Part C — startup circuit (MPst, weak always-on PMOS)
+*
+* Reference: pred_code_networks.md §20 (Parts A–D)
+*
+* Port map:  vbias_n  vcm  vpi  vdd  vss
+* =============================================================================
+
+.subckt bias_gen vbias_n vcm vpi vdd vss
+
+* =============================================================================
+* PART A: Beta-multiplier self-biased current reference
+* =============================================================================
+*
+* Topology:
+*
+*   VDD ─── MP1(diode) ─── vbias_n ─── MP2(mirror) ─── nbias_r
+*                              │                              │
+*                           MN1(diode)                    MN2(source-degen)
+*                              │                              │
+*                             VSS                           nr1
+*                                                            │
+*                                                          R1 (50kΩ)
+*                                                            │
+*                                                           VSS
+*
+* vbias_n is the single reference node: MP1/MP2/MP3 gates and MN1/MN2 gates
+* all tie here.  The PMOS sees |Vsg| = VDD − vbias_n ≈ 1.2 V (Vbias_p side);
+* the NMOS sees Vgs = vbias_n ≈ 0.6 V (Vbias_n side).
+*
+* Operating point at 27°C tt corner (BSIM4 ngspice-42 verified):
+*   Ibias  = 0.33 µA  (R1 drop 16.6mV / 50kΩ; long-channel PMOS limits current)
+*   vbias_n = 0.760 V  (verified); I_vdd_total = 8.9 µA (5µA divider + 3.9µA core)
+
+* MP1: diode-connected PMOS (left branch, sets Vbias_p = VDD − vbias_n)
+* Ports: d g s b
+XMP1 vbias_n vbias_n vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=2
+
+* MN1: diode-connected NMOS (left branch, sets Vbias_n = vbias_n)
+* W=1/L=1: small device → higher Vgs at equal current = source of ΔVgs
+* Ports: d g s b
+XMN1 vbias_n vbias_n vss vss sky130_fd_pr__nfet_01v8 w=1 l=1
+
+* MP2: mirror PMOS, right branch (delivers Ibias to MN2/R1 stack)
+XMP2 nbias_r vbias_n vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=2
+
+* MN2: source-degenerated NMOS, right branch
+* W=8/L=1: 8× larger than MN1 → lower Vgs at equal current
+* Source degeneration R1 absorbs ΔVgs: Ibias = ΔVgs / R1
+XMN2 nbias_r vbias_n nr1 vss sky130_fd_pr__nfet_01v8 w=8 l=1
+
+* R1: 50 kΩ degeneration resistor  (sky130 res_high_po_0p35, ≈25 sq × 2 kΩ/sq)
+* Using ideal resistor here; replace with sky130_fd_pr__res_high_po_0p35 in layout.
+R1 nr1 vss 50000
+
+* MP3: second mirror copy — provides current tail for the Vcm/Vpi buffer
+* (buf not included in v1; MP3 drain held via R_mp3 bleed to prevent floating node)
+XMP3 nmp3_drain vbias_n vdd vdd sky130_fd_pr__pfet_01v8 w=4 l=2
+R_mp3 nmp3_drain vss 1000000
+
+
+* =============================================================================
+* PART C: Startup circuit
+* =============================================================================
+*
+* Without startup, the beta-multiplier has a second stable state at Ibias = 0.
+* MPst is a weak always-on PMOS (gate = VSS → always conducting) that injects
+* a small current into vbias_n on power-up to break the zero-current lock.
+* Once the loop reaches its operating point MPst contributes a small offset
+* (~2 nA vs Ibias ~1.2 µA) and is inconsequential.
+*
+* W=0.5/L=4: long channel minimises the on-current while ensuring startup.
+
+XMPst vbias_n vss vdd vdd sky130_fd_pr__pfet_01v8 w=0.5 l=4
+
+
+* =============================================================================
+* PART B: Vcm and Vpi resistor divider
+* =============================================================================
+*
+* 3-tap resistor chain sets both references from a single divider:
+*
+*   VDD (1.8V)
+*    │
+*   R_top  180 kΩ
+*    │
+*   vcm  = 0.9 V  → all mac_cell inn ports
+*    │
+*   R_mid   50 kΩ
+*    │
+*   vpi  = 0.65 V → all precision_gate comparators
+*    │
+*   R_bot  130 kΩ
+*    │
+*   VSS
+*
+* Check: vcm = 1.8 × (50+130)/360 = 0.9 V ✓
+*        vpi = 1.8 × 130/360      = 0.65 V ✓
+* Total current = 1.8 V / 360 kΩ = 5 µA (static, always-on)
+*
+* Trim: adjusting R_mid changes Vpi without affecting Vcm (to first order).
+* Using ideal resistors; replace with sky130_fd_pr__res_high_po_0p35 in layout.
+
+R_top vdd vcm  180000
+R_mid vcm vpi   50000
+R_bot vpi vss  130000
+
+.ends bias_gen

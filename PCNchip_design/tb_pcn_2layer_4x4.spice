@@ -1,0 +1,289 @@
+* =============================================================================
+* tb_pcn_2layer_4x4.spice — 2-module 4×4 integration testbench
+* File:      tb_pcn_2layer_4x4.spice
+* Simulator: ngspice 42+
+* Run via:   ./run_sim.sh --netlist tb_pcn_2layer_4x4.spice
+*
+* Tests three signal paths:
+*   T1 (op-point):  bias rails settle; V(m0_iout) ≈ 0.47V; PMOS SF level-shift verified.
+*   T2 (transient): Hebbian WE pulse on mod0 row 0 produces ΔVw > 0.
+*   T3 (DC sweep):  mod0 col0 input swept ±50mV; m1_inp0 tracks with PMOS SF shift.
+*
+* Circuit hierarchy:
+*   Xmod0 — pcn_module_4x4 (lower, raw inputs, receives prediction from Xlink04)
+*   Xmod1 — pcn_module_4x4 (upper, ascending inputs, i_pred tied to VSS)
+*   Xlink04 — layer_link_4 (ascending PMOS SF raises +0.67V; descending prediction, 4 rows)
+*
+* All biases provided by voltage sources (no bias_gen) for isolation.
+*
+* Key expected operating points (BSIM4 tt, 27°C, pcn_mac_cell MP1/MP2 L=0.7µm):
+*   V(m0_iout0) ≈ 0.47V   current_sub XMPS1 loads KCL bus below Vcm (§70)
+*   V(nvcm_upper) ≈ 1.14V  reference PMOS SF: vcm_iout(0.468V) + |Vgs_P|
+*   V(m1_inp0)  ≈ 1.14V   PMOS SF: V(m0_iout) + |Vgs_P| ≈ 0.47 + 0.67V (§71)
+*   V(m0_pred0) ≈ 0−35mV  XMPRED in triode; I_pred ≈ I_actual_mirror
+*   V(m0_err0)  HIGH (1.8V) ierr_dig fires; I_MPG2 << I_XMPRED → i_in → 0V
+*
+* Notes:
+*   - precision_gate comparator is always active (I_MPG2 × R_err << VDD/2)
+*     so ierr_dig=HIGH is expected at all operating points in this first rev.
+*   - Hebbian ΔVw test depends on v_post=ierr_dig=HIGH + WE=HIGH + inp > Vcm.
+*   - Design-doc §25 I_bias (50µA) not yet in pcn_mac_cell.spice; KCL bus
+*     biased only by MPS1 (W=4/L=2 mirror).  Quantitative accuracy deferred.
+* =============================================================================
+
+.title PCN 2-layer 4x4 integration testbench
+
+.lib "$PDK_ROOT/sky130A/libs.tech/ngspice/sky130.lib.spice" tt
+.include "pcn_mac_cell.spice"
+.include "layer_link.spice"
+.include "pcn_array_4x4.spice"
+.include "pcn_module_4x4.spice"
+
+* ── Simulation options (help convergence for large feedback network) ──────────
+.options RELTOL=1e-3 ABSTOL=1e-12 VNTOL=1e-6 GMIN=1e-10
+
+* ── Supplies and bias rails (all from stiff voltage sources) ──────────────────
+Vdd     vdd      0   DC 1.8
+Vcm     vcm      0   DC 0.9
+Vbn     vbias_n  0   DC 0.760
+Vbp     vbias_p  0   DC 1.2
+Vpi     vpi      0   DC 0.65
+Vcm_iout  ncm_iout  0  DC 0.468
+
+* ── Module 0 column inputs  ───────────────────────────────────────────────────
+* col0 has a separate source so T2 (tran) can bump it to 1.1V for Hebbian test;
+* col1..3 held at Vcm = 0.9V throughout.
+Vinp0  m0_inp0  0  DC 0.9
+Vinp1  m0_inp1  0  DC 0.9
+Vinp2  m0_inp2  0  DC 0.9
+Vinp3  m0_inp3  0  DC 0.9
+
+* ── Module 0 write-enable  ───────────────────────────────────────────────────
+* Row 0 gets a 20ns pulse starting at t=50ns; rows 1–3 stay low.
+Vwe0  m0_we0  0  PULSE(0 1.8 50n 1n 1n 20n 200n)
+Vwe1  m0_we1  0  DC 0
+Vwe2  m0_we2  0  DC 0
+Vwe3  m0_we3  0  DC 0
+
+* ── Module 0 (lower) ─────────────────────────────────────────────────────────
+* Port order: inp_col_c inn_col_c × 4 | iout_row × 4 | i_pred × 4 |
+*             ierr_dig × 4 | we_row × 4 | vpi × 4 | vbias_p vbias_n vcm vdd vss
+Xmod0
++ m0_inp0  vcm  m0_inp1  vcm  m0_inp2  vcm  m0_inp3  vcm
++ m0_iout0  m0_iout1  m0_iout2  m0_iout3
++ m0_pred0  m0_pred1  m0_pred2  m0_pred3
++ m0_err0  m0_err1  m0_err2  m0_err3
++ m0_we0  m0_we1  m0_we2  m0_we3
++ vpi  vpi  vpi  vpi
++ vbias_p  vbias_n  vcm  vdd  0
++ pcn_module_4x4
+
+* ── Module 1 (upper) ─────────────────────────────────────────────────────────
+* i_pred = 0 (VSS): no top-layer prediction → maximum unsupervised error.
+* we_row = 0: Hebbian writes disabled for mod1 in this test.
+* m1_inp0..3 driven by Xlink04 ascending source followers.
+Xmod1
++ m1_inp0  nvcm_upper  m1_inp1  nvcm_upper  m1_inp2  nvcm_upper  m1_inp3  nvcm_upper
++ m1_iout0  m1_iout1  m1_iout2  m1_iout3
++ 0  0  0  0
++ m1_err0  m1_err1  m1_err2  m1_err3
++ 0  0  0  0
++ vpi  vpi  vpi  vpi
++ vbias_p  vbias_n  vcm  vdd  0
++ pcn_module_4x4
+
+* ── Layer link (4 rows) ──────────────────────────────────────────────────────
+* Ascending:  m0_iout_r → source follower → m1_inp_r
+* Descending: m1_iout_r gates XMPRED → sinks from m0_pred_r = m0_i_err_r
+Xlink04
++ m0_iout0  m0_iout1  m0_iout2  m0_iout3
++ m1_inp0   m1_inp1   m1_inp2   m1_inp3
++ m0_pred0  m0_pred1  m0_pred2  m0_pred3
++ m1_iout0  m1_iout1  m1_iout2  m1_iout3
++ nvcm_upper  ncm_iout  vbias_n  vdd  0
++ layer_link_4
+
+* ── Nodesets (seed convergence for large feedback network) ────────────────────
+* KCL buses: ≈0.47V — current_sub XMPS1 loads iout bus below Vcm (§70)
+.nodeset V(m0_iout0)=0.47  V(m0_iout1)=0.47  V(m0_iout2)=0.47  V(m0_iout3)=0.47
+.nodeset V(m1_iout0)=0.47  V(m1_iout1)=0.47  V(m1_iout2)=0.47  V(m1_iout3)=0.47
+* PMOS SF raises: V(iout_lower) + |Vgs_P| ≈ 0.47 + 0.67 = 1.14V
+.nodeset V(m1_inp0)=1.14   V(m1_inp1)=1.14   V(m1_inp2)=1.14   V(m1_inp3)=1.14
+.nodeset V(nvcm_upper)=1.14
+* Descending prediction: XMPRED in triode, V(i_pred) ≈ 0V
+.nodeset V(m0_pred0)=0.01  V(m0_pred1)=0.01  V(m0_pred2)=0.01  V(m0_pred3)=0.01
+* Error nodes (i_err, internal to pcn_module): near 0V (XMPRED dominates)
+.nodeset V(xmod0.i_err_0)=0.05  V(xmod0.i_err_1)=0.05
+.nodeset V(xmod0.i_err_2)=0.05  V(xmod0.i_err_3)=0.05
+* mod1 i_err: forced to 0V by i_pred=VSS connection (via Vpred_shunt)
+.nodeset V(xmod1.i_err_0)=0.0   V(xmod1.i_err_1)=0.0
+.nodeset V(xmod1.i_err_2)=0.0   V(xmod1.i_err_3)=0.0
+* Weights: initialise all to mid-range 0.75V
+.nodeset V(xmod0.xarray.vw_0_0)=0.75  V(xmod0.xarray.vw_0_1)=0.75
+.nodeset V(xmod0.xarray.vw_0_2)=0.75  V(xmod0.xarray.vw_0_3)=0.75
+.nodeset V(xmod0.xarray.vw_1_0)=0.75  V(xmod0.xarray.vw_1_1)=0.75
+.nodeset V(xmod0.xarray.vw_1_2)=0.75  V(xmod0.xarray.vw_1_3)=0.75
+.nodeset V(xmod0.xarray.vw_2_0)=0.75  V(xmod0.xarray.vw_2_1)=0.75
+.nodeset V(xmod0.xarray.vw_2_2)=0.75  V(xmod0.xarray.vw_2_3)=0.75
+.nodeset V(xmod0.xarray.vw_3_0)=0.75  V(xmod0.xarray.vw_3_1)=0.75
+.nodeset V(xmod0.xarray.vw_3_2)=0.75  V(xmod0.xarray.vw_3_3)=0.75
+.nodeset V(xmod1.xarray.vw_0_0)=0.75  V(xmod1.xarray.vw_0_1)=0.75
+.nodeset V(xmod1.xarray.vw_0_2)=0.75  V(xmod1.xarray.vw_0_3)=0.75
+.nodeset V(xmod1.xarray.vw_1_0)=0.75  V(xmod1.xarray.vw_1_1)=0.75
+.nodeset V(xmod1.xarray.vw_1_2)=0.75  V(xmod1.xarray.vw_1_3)=0.75
+.nodeset V(xmod1.xarray.vw_2_0)=0.75  V(xmod1.xarray.vw_2_1)=0.75
+.nodeset V(xmod1.xarray.vw_2_2)=0.75  V(xmod1.xarray.vw_2_3)=0.75
+.nodeset V(xmod1.xarray.vw_3_0)=0.75  V(xmod1.xarray.vw_3_1)=0.75
+.nodeset V(xmod1.xarray.vw_3_2)=0.75  V(xmod1.xarray.vw_3_3)=0.75
+* iwrite nodes (floating when WE=0; GMIN provides path, nodeset guides iteration)
+.nodeset V(xmod0.xarray.iwrite_0_0)=0.9  V(xmod0.xarray.iwrite_0_1)=0.9
+.nodeset V(xmod0.xarray.iwrite_0_2)=0.9  V(xmod0.xarray.iwrite_0_3)=0.9
+.nodeset V(xmod0.xarray.iwrite_1_0)=0.9  V(xmod0.xarray.iwrite_1_1)=0.9
+.nodeset V(xmod0.xarray.iwrite_1_2)=0.9  V(xmod0.xarray.iwrite_1_3)=0.9
+.nodeset V(xmod0.xarray.iwrite_2_0)=0.9  V(xmod0.xarray.iwrite_2_1)=0.9
+.nodeset V(xmod0.xarray.iwrite_2_2)=0.9  V(xmod0.xarray.iwrite_2_3)=0.9
+.nodeset V(xmod0.xarray.iwrite_3_0)=0.9  V(xmod0.xarray.iwrite_3_1)=0.9
+.nodeset V(xmod0.xarray.iwrite_3_2)=0.9  V(xmod0.xarray.iwrite_3_3)=0.9
+.nodeset V(xmod1.xarray.iwrite_0_0)=0.9  V(xmod1.xarray.iwrite_0_1)=0.9
+.nodeset V(xmod1.xarray.iwrite_0_2)=0.9  V(xmod1.xarray.iwrite_0_3)=0.9
+.nodeset V(xmod1.xarray.iwrite_1_0)=0.9  V(xmod1.xarray.iwrite_1_1)=0.9
+.nodeset V(xmod1.xarray.iwrite_1_2)=0.9  V(xmod1.xarray.iwrite_1_3)=0.9
+.nodeset V(xmod1.xarray.iwrite_2_0)=0.9  V(xmod1.xarray.iwrite_2_1)=0.9
+.nodeset V(xmod1.xarray.iwrite_2_2)=0.9  V(xmod1.xarray.iwrite_2_3)=0.9
+.nodeset V(xmod1.xarray.iwrite_3_0)=0.9  V(xmod1.xarray.iwrite_3_1)=0.9
+.nodeset V(xmod1.xarray.iwrite_3_2)=0.9  V(xmod1.xarray.iwrite_3_3)=0.9
+
+
+* =============================================================================
+.control
+
+  set filetype = ascii
+
+  * ──────────────────────────────────────────────────────────────────────────
+  * T1: Operating point
+  * ──────────────────────────────────────────────────────────────────────────
+  echo ""
+  echo "======================================================"
+  echo " T1: Operating point — bias rails and signal levels"
+  echo "======================================================"
+
+  op
+
+  echo "  V(vbias_n) = " $&V(vbias_n)  " V  (target: 0.760)"
+  echo "  V(vcm)     = " $&V(vcm)      " V  (target: 0.900)"
+  echo "  V(vpi)     = " $&V(vpi)      " V  (target: 0.650)"
+  echo ""
+  echo "  V(ncm_iout)  = " $&V(ncm_iout)  " V  (vcm_iout stiff bias; target 0.468)"
+  echo "  V(m0_iout0)  = " $&V(m0_iout0) " V  (mod0 row0 KCL bus; expect ~0.47V)"
+  echo "  V(nvcm_upper)= " $&V(nvcm_upper) " V  (ref PMOS SF out; expect ~1.14V)"
+  echo "  V(m1_iout0)  = " $&V(m1_iout0) " V  (mod1 row0 KCL bus; expect ~0.47V)"
+  echo "  V(m1_inp0)   = " $&V(m1_inp0)  " V  (ascending PMOS SF out; expect ~1.14V)"
+  echo "  V(m0_pred0)  = " $&V(m0_pred0) " V  (descending prediction; expect ~0V)"
+  echo ""
+  echo "  V(m0_err0)  = " $&V(m0_err0)  " V  (mod0 ierr_dig; expect HIGH ~1.8V)"
+  echo "  V(m1_err0)  = " $&V(m1_err0)  " V  (mod1 ierr_dig; expect HIGH ~1.8V)"
+  echo ""
+
+  * Measure level-shift direction (PMOS SF ascending path check — should be POSITIVE)
+  let level_shift = V(m1_inp0) - V(m0_iout0)
+  echo "  Ascending level shift (V(m1_inp0) - V(m0_iout0)) = " $&level_shift " V"
+  if level_shift > 0
+    echo "  PASS: ascending path shifts upward (PMOS SF active; expect +0.67V)"
+  else
+    echo "  WARN: level shift negative or zero — check layer_link XMSF (should be PMOS SF)"
+  end
+
+  write output/t1_op.raw
+  echo "  Saved: output/t1_op.raw"
+
+
+  * ──────────────────────────────────────────────────────────────────────────
+  * T2: Transient — Hebbian weight update
+  * Sample Vw_0_0 before, apply WE pulse (50ns–70ns), sample after.
+  * inp_col_0 raised to 1.1V (positive differential) to drive Hebbian update.
+  * ──────────────────────────────────────────────────────────────────────────
+  echo ""
+  echo "======================================================"
+  echo " T2: Transient — Hebbian write on mod0 row0 col0"
+  echo "======================================================"
+
+  let Vw_before = V(xmod0.xarray.vw_0_0)
+  echo "  V(vw_0_0) before pulse = " $&Vw_before " V  (initial weight)"
+
+  * Raise col0 input above Vcm to drive positive differential → LTP
+  alter @vinp0[dc] = 1.1
+
+  tran 0.5n 150n
+
+  meas tran Vw_t120   FIND V(xmod0.xarray.vw_0_0)   AT=120n
+  meas tran Verr_t60  FIND V(m0_err0)                AT=60n
+  meas tran Vwe_t60   FIND V(m0_we0)                 AT=60n
+
+  echo "  V(m0_err0) at t=60ns  = " $&Verr_t60 " V  (should be HIGH during write)"
+  echo "  V(m0_we0)  at t=60ns  = " $&Vwe_t60  " V  (should be 1.8V during pulse)"
+  echo "  V(vw_0_0)  at t=120ns = " $&Vw_t120  " V  (post-pulse weight)"
+
+  let dVw = Vw_t120 - Vw_before
+  echo "  Delta Vw = " $&dVw " V"
+
+  let dVw_abs = abs(dVw)
+  if dVw_abs > 1e-4
+    echo "  PASS: weight changed — Hebbian write path functional"
+  else
+    echo "  NOTE: weight unchanged — ierr_dig or write path may be blocked"
+  end
+
+  write output/t2_tran.raw
+  wrdata output/t2_tran.csv v(xmod0.xarray.vw_0_0) v(m0_err0) v(m0_we0) v(m0_iout0)
+  echo "  Saved: output/t2_tran.raw  output/t2_tran.csv"
+
+
+  * ──────────────────────────────────────────────────────────────────────────
+  * T3: DC sweep — ascending layer-link gain
+  * Sweep m0_inp0 around Vcm; measure response at m0_iout0 and m1_inp0.
+  * ──────────────────────────────────────────────────────────────────────────
+  echo ""
+  echo "======================================================"
+  echo " T3: DC sweep — ascending signal transfer"
+  echo "======================================================"
+
+  * Restore col0 to Vcm for clean DC sweep starting point
+  alter @vinp0[dc] = 0.9
+
+  dc vinp0 0.85 0.95 0.005
+
+  meas dc Viout_lo  FIND V(m0_iout0) WHEN V(m0_inp0)=0.86 CROSS=1
+  meas dc Viout_hi  FIND V(m0_iout0) WHEN V(m0_inp0)=0.94 CROSS=1
+  meas dc Vinp1_lo  FIND V(m1_inp0)  WHEN V(m0_inp0)=0.86 CROSS=1
+  meas dc Vinp1_hi  FIND V(m1_inp0)  WHEN V(m0_inp0)=0.94 CROSS=1
+
+  let d_iout = Viout_hi - Viout_lo
+  let d_inp1 = Vinp1_hi - Vinp1_lo
+
+  echo "  V(m0_iout0) at inp=0.86V: " $&Viout_lo " V"
+  echo "  V(m0_iout0) at inp=0.94V: " $&Viout_hi " V"
+  echo "  V(m0_iout0) swing over 80mV input: " $&d_iout " V"
+  echo "  V(m1_inp0)  at inp=0.86V: " $&Vinp1_lo " V"
+  echo "  V(m1_inp0)  at inp=0.94V: " $&Vinp1_hi " V"
+  echo "  V(m1_inp0)  swing over 80mV input: " $&d_inp1 " V"
+
+  if abs(d_inp1) > 0.001
+    echo "  PASS: ascending signal propagates through layer_link"
+  else
+    echo "  WARN: m1_inp0 unresponsive to mod0 input — check layer_link ascending path"
+  end
+
+  write output/t3_dc.raw
+  wrdata output/t3_dc.csv v(m0_inp0) v(m0_iout0) v(m1_inp0) v(m0_pred0)
+  echo "  Saved: output/t3_dc.raw  output/t3_dc.csv"
+
+  echo ""
+  echo "======================================================"
+  echo " All tests complete"
+  echo "======================================================"
+
+  quit
+
+.endc
+
+.end
