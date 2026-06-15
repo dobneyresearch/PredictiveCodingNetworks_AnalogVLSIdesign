@@ -9,7 +9,7 @@ Inference is computed by transconductance and Kirchhoff's current law.
 Hebbian weight updates happen on-chip — no weight data crosses the chip boundary
 during inference or learning.
 
-A companion arXiv preprint is in `paper/main_v3.tex`.
+A target companion arXiv preprint is in `paper/main_v3.tex` (not yet on arXiv)
 
 ---
 
