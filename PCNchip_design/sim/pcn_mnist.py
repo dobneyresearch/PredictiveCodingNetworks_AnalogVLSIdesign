@@ -1,5 +1,6 @@
 """
-pcn_mnist.py — MNIST digit classification using hardware-faithful PCN simulation.
+pcn_mnist.py — MNIST digit / EMNIST letter classification using hardware-faithful
+PCN simulation (DATASET=mnist | emnist_letters).
 
 Demonstrates that the PCN multi-chip architecture, scaled to real image data,
 learns meaningful visual features via unsupervised Hebbian GHA and achieves
@@ -42,21 +43,29 @@ Optional 8-bit inference:
   unit-norm rows have element magnitudes ≈ 1/√784 ≈ 0.036, which occupies
   about 2–3 quantisation steps (step ≈ 0.0156); accuracy impact is quantified.
 
-Outputs  (written to sim/results/):
-  mnist_topology.txt      — hardware topology summary (copy of console header)
-  mnist_filters_l0.png    — 64 learned L0 filters as 8×8 grid of 28×28 patches
-  mnist_filters_l1.png    — 16 L1 codes projected back to pixel space
-  mnist_training.png      — GHA reconstruction error + LR schedule
-  mnist_confusion.png     — 10×10 confusion matrix on MNIST test set
+Outputs  (written to sim/results/, filenames prefixed by dataset — 'mnist_*' or
+'emnist_letters_*'):
+  {tag}_topology.txt      — hardware topology summary (copy of console header)
+  {tag}_filters_l0.png    — N_L0 learned L0 filters as a grid of 28×28 patches
+  {tag}_filters_l1.png    — N_L1 codes projected back to pixel space
+  {tag}_training.png      — GHA reconstruction error + LR schedule
+  {tag}_confusion.png     — N_CLASSES × N_CLASSES confusion matrix on the test set
 
 Configuration:
   Edit the constants below, or override via environment variables:
-    CLASSIFIER=logistic python pcn_mnist.py   # sklearn LogisticRegression
-    QUANTISE=0 python pcn_mnist.py            # skip 8-bit comparison
+    DATASET=emnist_letters python pcn_mnist.py   # 26-class a-z instead of MNIST digits
+    CLASSIFIER=logistic python pcn_mnist.py      # sklearn LogisticRegression
+    QUANTISE=0 python pcn_mnist.py               # skip 8-bit comparison
 
 Data:
-  Requires sklearn (pip install scikit-learn) or torchvision (pip install torchvision).
-  sklearn.datasets.fetch_openml downloads and caches MNIST automatically (~55 MB).
+  MNIST    — requires sklearn (pip install scikit-learn) or torchvision.
+             sklearn.datasets.fetch_openml downloads and caches MNIST (~55 MB).
+  EMNIST   — requires torchvision (pip install torchvision).  The 'letters'
+             split (26 balanced classes, a-z, merged case) is loaded; the full
+             EMNIST archive (~560 MB) is downloaded once and cached under
+             ~/.cache/emnist/.  EMNIST images ship transposed relative to the
+             MNIST pixel convention — corrected on load so filter plots render
+             upright letters.
 """
 
 import math
@@ -110,9 +119,25 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 #                'lstsq'    uses numpy least-squares (no sklearn dependency).
 #                Neither runs on the chip; both represent a thin host-side head.
 
-N_IN        = 784    # MNIST: 28 × 28 pixels (fixed by dataset)
-N_L0        = 64     # L0 features  — 196 chips @ 64, 392 @ 128, 784 @ 256
-N_L1        = 16     # L1 codes     — 4 chips @ 16, 8 @ 32
+DATASET = os.environ.get('DATASET', 'mnist')   # 'mnist' (digits) | 'emnist_letters' (a-z)
+
+if DATASET == 'mnist':
+    N_CLASSES   = 10
+    CLASS_NAMES = [str(d) for d in range(10)]
+    RESULTS_TAG = 'mnist'
+elif DATASET == 'emnist_letters':
+    N_CLASSES   = 26
+    CLASS_NAMES = list('abcdefghijklmnopqrstuvwxyz')
+    RESULTS_TAG = 'emnist_letters'
+else:
+    raise ValueError(f"Unknown DATASET={DATASET!r}; expected 'mnist' or 'emnist_letters'")
+
+N_IN        = 784    # 28 × 28 pixels (fixed by image size — same for MNIST and EMNIST)
+N_L0        = int(os.environ.get('N_L0', 64 if DATASET == 'mnist' else 96))
+N_L1        = int(os.environ.get('N_L1', 16 if DATASET == 'mnist' else 32))
+            # L0/L1 sizing  — 196 L0 chips @ 64, 392 @ 128;  4 L1 chips @ 16, 8 @ 32.
+            # EMNIST letters defaults to a wider L0/L1 (26-class task needs more
+            # discriminative capacity than 10-digit MNIST).
 
 CHIP_ROWS   = 16     # Fixed by Sky130A tape-out
 CHIP_COLS   = 16
@@ -154,9 +179,11 @@ def print_topology():
     lines = [
         "",
         "━" * 62,
-        "PCN MNIST Demo  —  analog multi-chip inference + Hebbian GHA",
+        f"PCN {DATASET.upper()} Demo  —  analog multi-chip inference + Hebbian GHA",
         "━" * 62,
         "",
+        f"Dataset        : {DATASET}  ({N_CLASSES} classes: "
+            f"{CLASS_NAMES[0]}-{CLASS_NAMES[-1]})",
         f"Hardware topology  (Sky130A, {CHIP_ROWS}×{CHIP_COLS} MAC cells per chip):",
         "",
         f"  Layer 0 — pixel projection  ({N_IN} → {N_L0})",
@@ -197,7 +224,7 @@ def print_topology():
     ]
     text = "\n".join(lines)
     print(text)
-    with open(os.path.join(RESULTS_DIR, 'mnist_topology.txt'), 'w') as f:
+    with open(os.path.join(RESULTS_DIR, f'{RESULTS_TAG}_topology.txt'), 'w') as f:
         f.write(text)
     return {'l0_chips': l0_n, 'l1_chips': l1_n, 'total_chips': total,
             'total_cells': cells}
@@ -258,6 +285,51 @@ def load_mnist():
         "  pip install scikit-learn\n"
         "  pip install torchvision\n"
     )
+
+
+def load_emnist_letters():
+    """
+    Load the EMNIST 'letters' split: 26 balanced classes (a-z, merged case),
+    124,800 train / 20,800 test, 28×28 grayscale.
+
+    Requires torchvision; downloads and caches the full EMNIST archive
+    (~560 MB, one-time) under ~/.cache/emnist/.
+
+    Reads the raw .data/.targets tensors directly (bypassing __getitem__/
+    ToTensor) since no transform is needed beyond the orientation fix below —
+    this also avoids a slow 145,600-iteration Python loop.
+
+    EMNIST images ship transposed relative to the MNIST pixel convention;
+    confirmed by inspection (sample 0, label 'w', renders correctly only
+    after a row/col transpose) — corrected here so reshaping back to 28×28
+    for filter plots gives upright letters.  Labels are 1-indexed in the
+    official split (1=a … 26=z); remapped to 0-indexed to match CLASS_NAMES.
+
+    Returns
+    -------
+    X_train : (124800, 784) float32 in [0, 1]
+    y_train : (124800,) int, 0-25
+    X_test  : (20800, 784) float32 in [0, 1]
+    y_test  : (20800,) int, 0-25
+    """
+    print("Loading EMNIST letters ...")
+    import torchvision.datasets as tvd
+
+    cache = os.path.join(os.path.expanduser('~'), '.cache', 'emnist')
+    tr = tvd.EMNIST(cache, split='letters', train=True,  download=True)
+    te = tvd.EMNIST(cache, split='letters', train=False, download=True)
+
+    def _to_arrays(ds):
+        imgs = ds.data.numpy().transpose(0, 2, 1)        # fix row/col orientation
+        X    = (imgs.reshape(len(ds), -1).astype(np.float32)) / 255.0
+        y    = ds.targets.numpy().astype(int) - 1        # 1-indexed -> 0-indexed
+        return X, y
+
+    X_train, y_train = _to_arrays(tr)
+    X_test,  y_test  = _to_arrays(te)
+    print(f"  torchvision: {X_train.shape[0]:,} train / {X_test.shape[0]:,} test"
+          f"  (26 classes, a-z)")
+    return X_train, y_train, X_test, y_test
 
 
 def preprocess(X_train, X_test):
@@ -444,7 +516,7 @@ def extract_features(layer, X, relu=True):
 
 # ── Classifiers ───────────────────────────────────────────────────────────────
 
-def _onehot(y, n=10):
+def _onehot(y, n=N_CLASSES):
     Y = np.zeros((len(y), n), dtype=np.float64)
     Y[np.arange(len(y)), y] = 1.0
     return Y
@@ -492,7 +564,7 @@ def classify_logistic(F_train, y_train, F_test, y_test):
     F_te_sc = scaler.transform(F_test.astype(np.float64))
 
     clf = LogisticRegression(
-        solver='lbfgs', C=10.0, max_iter=2000, random_state=0, n_jobs=-1,
+        solver='lbfgs', C=10.0, max_iter=5000, random_state=0, n_jobs=-1,
     )
     clf.fit(F_tr_sc, y_train)
     pred = clf.predict(F_te_sc)
@@ -585,34 +657,39 @@ def plot_training(logs, labels, fname='mnist_training.png'):
 
 
 def plot_confusion(y_true, y_pred, title, fname='mnist_confusion.png'):
-    """Normalised 10×10 confusion matrix with per-cell text annotations."""
+    """Normalised N_CLASSES × N_CLASSES confusion matrix.
+
+    Per-cell text annotations are skipped above 12 classes (e.g. the 26-class
+    EMNIST letters task) since they become unreadable clutter at that size.
+    """
     plt = _get_plt()
     if plt is None:
         print("  matplotlib not available — skipping confusion matrix")
         return
 
-    n  = 10
+    n  = N_CLASSES
     cm = np.zeros((n, n), dtype=int)
     for t, p in zip(y_true, y_pred):
         cm[t, p] += 1
     cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
-    fig, ax = plt.subplots(figsize=(7, 6))
+    fig, ax = plt.subplots(figsize=(7, 6) if n <= 12 else (10, 9))
     im = ax.imshow(cm_norm, cmap='Blues', vmin=0.0, vmax=1.0)
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='Fraction of true class')
 
-    for i in range(n):
-        for j in range(n):
-            v = cm_norm[i, j]
-            ax.text(j, i, f'{v:.2f}', ha='center', va='center',
-                    fontsize=7, color='white' if v > 0.55 else 'black')
+    if n <= 12:
+        for i in range(n):
+            for j in range(n):
+                v = cm_norm[i, j]
+                ax.text(j, i, f'{v:.2f}', ha='center', va='center',
+                        fontsize=7, color='white' if v > 0.55 else 'black')
 
     ax.set_xticks(range(n))
-    ax.set_xticklabels(range(n))
+    ax.set_xticklabels(CLASS_NAMES, fontsize=9 if n <= 12 else 7)
     ax.set_yticks(range(n))
-    ax.set_yticklabels(range(n))
-    ax.set_xlabel('Predicted digit')
-    ax.set_ylabel('True digit')
+    ax.set_yticklabels(CLASS_NAMES, fontsize=9 if n <= 12 else 7)
+    ax.set_xlabel('Predicted class')
+    ax.set_ylabel('True class')
     ax.set_title(title)
 
     plt.tight_layout()
@@ -642,7 +719,10 @@ def main():
     topo = print_topology()
 
     # ── Data ──────────────────────────────────────────────────────────────────
-    X_train_raw, y_train, X_test_raw, y_test = load_mnist()
+    if DATASET == 'mnist':
+        X_train_raw, y_train, X_test_raw, y_test = load_mnist()
+    else:
+        X_train_raw, y_train, X_test_raw, y_test = load_emnist_letters()
     X_train, X_test, _ = preprocess(X_train_raw, X_test_raw)
     print(f"\n  Preprocessing: pixel mean subtracted, per-sample L2 normalised")
     print(f"  X_train {X_train.shape}  X_test {X_test.shape}  dtype={X_train.dtype}")
@@ -727,7 +807,7 @@ def main():
           f"  ({topo['l0_chips']} L0 + {topo['l1_chips']} L1,  Sky130A)")
     print(f"  Weight cells    : {topo['total_cells']:,}")
     print(f"  Learning        : GHA  {N_EPOCHS_L0} + {N_EPOCHS_L1} epochs"
-          f"  (unsupervised, 60 K samples)")
+          f"  (unsupervised, {len(X_train):,} samples)")
     print()
     best_acc, best_pred = 0.0, None
     best_label = ''
@@ -746,18 +826,18 @@ def main():
               f"({'better' if drop < 0 else 'worse'} than float)")
     print()
 
-    # Per-digit accuracy for the best result
-    print("  Per-digit accuracy (best result):")
-    per_digit = []
-    for d in range(10):
+    # Per-class accuracy for the best result
+    print("  Per-class accuracy (best result):")
+    per_class = []
+    for d in range(N_CLASSES):
         mask = y_test == d
-        digit_acc = float(np.mean(best_pred[mask] == d))
-        per_digit.append(digit_acc)
-        print(f"    digit {d} : {digit_acc * 100:5.1f}%  ({mask.sum()} samples)")
-    worst  = int(np.argmin(per_digit))
-    best_d = int(np.argmax(per_digit))
-    print(f"  Hardest digit : {worst} ({per_digit[worst]*100:.1f}%)   "
-          f"Easiest : {best_d} ({per_digit[best_d]*100:.1f}%)")
+        class_acc = float(np.mean(best_pred[mask] == d))
+        per_class.append(class_acc)
+        print(f"    class {CLASS_NAMES[d]:>2} : {class_acc * 100:5.1f}%  ({mask.sum()} samples)")
+    worst  = int(np.argmin(per_class))
+    best_c = int(np.argmax(per_class))
+    print(f"  Hardest class : {CLASS_NAMES[worst]} ({per_class[worst]*100:.1f}%)   "
+          f"Easiest : {CLASS_NAMES[best_c]} ({per_class[best_c]*100:.1f}%)")
     print()
 
     # ── Plots ─────────────────────────────────────────────────────────────────
@@ -766,17 +846,19 @@ def main():
         L0.W, (28, 28), n_grid_cols=8,
         title=(f'L0 learned filters  ({N_IN}→{N_L0}, GHA, {N_EPOCHS_L0} epochs)  '
                f'— {topo["l0_chips"]} Sky130A chips'),
-        fname='mnist_filters_l0.png',
+        fname=f'{RESULTS_TAG}_filters_l0.png',
     )
-    plot_l1_pixel(L0.W, L1.W, (28, 28))
+    plot_l1_pixel(L0.W, L1.W, (28, 28), fname=f'{RESULTS_TAG}_filters_l1.png')
     plot_training(
         [log_l0, log_l1],
         [f'L0  ({N_L0} features, {topo["l0_chips"]} chips)',
          f'L1  ({N_L1} codes,    {topo["l1_chips"]} chips)'],
+        fname=f'{RESULTS_TAG}_training.png',
     )
     plot_confusion(
         y_test, best_pred,
-        title=f'PCN MNIST  {best_label.strip()}  —  {best_acc * 100:.2f}%',
+        title=f'PCN {DATASET.upper()}  {best_label.strip()}  —  {best_acc * 100:.2f}%',
+        fname=f'{RESULTS_TAG}_confusion.png',
     )
     print("\n  All outputs written to sim/results/")
 
