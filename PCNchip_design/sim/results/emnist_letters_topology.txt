@@ -1,24 +1,24 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PCN MNIST Demo  —  analog multi-chip inference + Hebbian GHA
+PCN EMNIST_LETTERS Demo  —  analog multi-chip inference + Hebbian GHA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Dataset        : mnist  (10 classes: 0-9)
+Dataset        : emnist_letters  (26 classes: a-z)
 Hardware topology  (Sky130A, 16×16 MAC cells per chip):
 
-  Layer 0 — pixel projection  (784 → 64)
+  Layer 0 — pixel projection  (784 → 96)
     Column tiles : ⌈784/16⌉ = 49  chips  (16 pixel inputs each, partial KCL sums on row bus)
-    Row tiles    : ⌈64/16⌉ =  4  chips  (16 output feature rows each)
-    Total (L0)   : 49 × 4 = 196 chips
+    Row tiles    : ⌈96/16⌉ =  6  chips  (16 output feature rows each)
+    Total (L0)   : 49 × 6 = 294 chips
 
-  Layer 1 — feature abstraction  (64 → 16)
-    Column tiles : ⌈64/16⌉ = 4  chips
-    Row tiles    : ⌈16/16⌉ = 1  chip
-    Total (L1)   : 4 × 1 = 4 chips
+  Layer 1 — feature abstraction  (96 → 32)
+    Column tiles : ⌈96/16⌉ = 6  chips
+    Row tiles    : ⌈32/16⌉ = 2  chip
+    Total (L1)   : 6 × 2 = 12 chips
 
-  Total chips    : 200  physical MAC arrays  (196 L0 + 4 L1)
-  Total cells    : 51,200  = 200 chips × 256 cells
-  Weight storage : 10.24 nF on-chip  (Vw = 0.50–1.35 V, 200 fF × cell)
+  Total chips    : 306  physical MAC arrays  (294 L0 + 12 L1)
+  Total cells    : 78,336  = 306 chips × 256 cells
+  Weight storage : 15.67 nF on-chip  (Vw = 0.50–1.35 V, 200 fF × cell)
   Off-chip weight bandwidth : 0 bit/s
 
   Classifier     : logistic  (supervised, host-side only)
@@ -26,8 +26,8 @@ Hardware topology  (Sky130A, 16×16 MAC cells per chip):
 
 Tunable parameters:
 
-  N_L0=64, N_L1=16   — increase for more features (each +16 L0 adds 49 chips)
-  N_EPOCHS_L0=1, N_EPOCHS_L1=1   — more epochs → better GHA convergence, linear time cost
+  N_L0=96, N_L1=32   — increase for more features (each +16 L0 adds 49 chips)
+  N_EPOCHS_L0=12, N_EPOCHS_L1=6   — more epochs → better GHA convergence, linear time cost
   LR_L0=0.01→0.0005, LR_L1=0.02→0.001   — maps to I_hebb×t_pulse/Cw (cosine decay)
 
 Fixed by Sky130A tape-out:
