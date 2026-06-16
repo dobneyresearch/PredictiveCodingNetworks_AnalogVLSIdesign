@@ -139,9 +139,10 @@ PCNchip_design/
 │   ├── refs.bib                # Bibliography (19 entries)
 │   └── main_v3.pdf             # Compiled PDF
 │
-├── pred_code_networks.md       # Full design journal (~10,500 lines; §1–§73)
+├── pred_code_networks.md       # Full design journal (~10,500 lines; §1–§75)
 ├── FeFET_7nm_discussion.md     # Weight storage options: MIM cap, FeFET, PCM, RRAM, WSI
 ├── sky130_summary.md           # Sky130A process design overview
+├── simulations_summary.md      # Python software simulation summary: MNIST, EMNIST
 ├── quickstart.md               # Quick-start guide for running simulations
 └── config.json                 # OpenLane project configuration
 ```
