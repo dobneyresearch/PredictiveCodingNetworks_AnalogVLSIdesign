@@ -111,6 +111,7 @@ PCNchip_design/
 │   ├── circuit_sim.py          # Hardware-calibrated model; 7 circuit experiments C1–C7
 │   ├── run_circuit_sim.py      # Runs C1–C7; cross-validates against SPICE
 │   ├── pcn_predict.py          # 2-layer GHA multi-cell PCN; 484× pred_err reduction
+│   ├── pcn_mnist.py            # MNIST digit classification using hardware-faithful PCN simulation
 │   └── results/                # Output figures (c1–c7, e1–e4, p_predictive_network)
 │
 ├── pnr/                        # OpenLane place-and-route
