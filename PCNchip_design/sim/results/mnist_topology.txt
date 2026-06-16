@@ -1,0 +1,34 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PCN MNIST Demo  —  analog multi-chip inference + Hebbian GHA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Hardware topology  (Sky130A, 16×16 MAC cells per chip):
+
+  Layer 0 — pixel projection  (784 → 64)
+    Column tiles : ⌈784/16⌉ = 49  chips  (16 pixel inputs each, partial KCL sums on row bus)
+    Row tiles    : ⌈64/16⌉ =  4  chips  (16 output feature rows each)
+    Total (L0)   : 49 × 4 = 196 chips
+
+  Layer 1 — feature abstraction  (64 → 16)
+    Column tiles : ⌈64/16⌉ = 4  chips
+    Row tiles    : ⌈16/16⌉ = 1  chip
+    Total (L1)   : 4 × 1 = 4 chips
+
+  Total chips    : 200  physical MAC arrays  (196 L0 + 4 L1)
+  Total cells    : 51,200  = 200 chips × 256 cells
+  Weight storage : 10.24 nF on-chip  (Vw = 0.50–1.35 V, 200 fF × cell)
+  Off-chip weight bandwidth : 0 bit/s
+
+  Classifier     : logistic  (supervised, host-side only)
+  8-bit comparison : enabled
+
+Tunable parameters:
+
+  N_L0=64, N_L1=16   — increase for more features (each +16 L0 adds 49 chips)
+  N_EPOCHS_L0=12, N_EPOCHS_L1=6   — more epochs → better GHA convergence, linear time cost
+  LR_L0=0.01→0.0005, LR_L1=0.02→0.001   — maps to I_hebb×t_pulse/Cw (cosine decay)
+
+Fixed by Sky130A tape-out:
+  16×16 MAC cells/chip   8-bit weight DAC (codes 71–192)   ReLU clamp (V1 PMOS)
+  V2 upgrade path: Gilbert cell → signed outputs → ~3 pp accuracy gain
