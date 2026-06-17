@@ -145,6 +145,7 @@ PCNchip_design/
 ├── FeFET_7nm_discussion.md     # Weight storage options: MIM cap, FeFET, PCM, RRAM, WSI
 ├── sky130_summary.md           # Sky130A process design overview
 ├── simulations_summary.md      # Python software simulation summary: MNIST, EMNIST
+├── PCN_versus_spiking.md       # Comparison of PCN and Spiking Neural Nets approaches
 ├── quickstart.md               # Quick-start guide for running simulations
 └── config.json                 # OpenLane project configuration
 ```
