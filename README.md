@@ -11,6 +11,8 @@ during inference or learning.
 
 A target companion arXiv preprint is in `paper/main_v3.tex` (not yet on arXiv)
 
+Architecture designed by Saul Dobney, coded and validated using Claude Code
+
 ---
 
 ## Key results
