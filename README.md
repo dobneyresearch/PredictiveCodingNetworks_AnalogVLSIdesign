@@ -9,7 +9,7 @@ Inference is computed by transconductance and Kirchhoff's current law.
 Hebbian weight updates happen on-chip — no weight data crosses the chip boundary
 during inference or learning.
 
-A target companion arXiv preprint is in `paper/main_v3.tex` (not yet on arXiv)
+A target companion arXiv preprint is in `paper/main_v3rev.tex` (not yet on arXiv)
 
 Architecture designed by Saul Dobney, coded and validated using Claude Code
 
@@ -137,9 +137,9 @@ PCNchip_design/
 │   └── mac_cell_tb.sch         # MAC cell testbench schematic
 │
 ├── paper/                      # ArXiv preprint
-│   ├── main_v3.tex             # Current submission draft (IEEEtran, 10 pages)
+│   ├── main_v3rev.tex          # Current submission draft (IEEEtran, 10 pages)
 │   ├── refs.bib                # Bibliography (19 entries)
-│   └── main_v3.pdf             # Compiled PDF
+│   └── main_v3rev.pdf          # Compiled PDF
 │
 ├── pred_code_networks.md       # Full design journal (~10,500 lines; §1–§75)
 ├── FeFET_7nm_discussion.md     # Weight storage options: MIM cap, FeFET, PCM, RRAM, WSI
