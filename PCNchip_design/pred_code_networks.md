@@ -9890,8 +9890,6 @@ output/tb_pcn_4col_2vl.raw      — ngspice binary waveform
 output/tb_pcn_4col_2vl.csv      — ASCII: V(iout_row0), V(inp_col_0..3), V(vw_0)
 ```
 
-Run command: `PDK=~/.volare/volare/sky130/versions/<hash>/; sed "s|\$PDK_ROOT|$PDK|g" tb_pcn_4col_2vl.spice > /tmp/run.spice && ngspice -b /tmp/run.spice`
-
 ---
 
 ## §68 — ArXiv paper v2: expanded scope (2026-06-13)
