@@ -8866,18 +8866,7 @@ The spatial pipeline cannot be fixed within the current 5T topology using bias/s
 
 ### §60.1 — Toolchain
 
-**OpenLane 2.3.10** (Python-based, `pip install openlane`) was already installed in the conda environment at `/home/saul/miniconda3/bin/openlane`. EDA tool binaries (OpenROAD, Yosys, Magic, KLayout, Verilator) are delivered via the Docker image `ghcr.io/efabless/openlane2:2.3.10` pulled from GitHub Container Registry. PDK root: `~/.volare/sky130A`.
-
-Invocation (required because the Claude Code shell process predated the docker group membership):
-
-```bash
-sg docker -c "docker run --rm \
-  -v /home/saul/NtntForClaude/PCNchip_design:/design \
-  -v /home/saul/.volare:/home/saul/.volare \
-  -e PDK_ROOT=/home/saul/.volare \
-  ghcr.io/efabless/openlane2:2.3.10 \
-  openlane --pdk-root /home/saul/.volare --pdk sky130A --flow Classic /design/pnr/config.yaml"
-```
+**OpenLane 2.3.10** (Python-based, `pip install openlane`) was already installed in the conda environment. EDA tool binaries (OpenROAD, Yosys, Magic, KLayout, Verilator) are delivered via the Docker image `ghcr.io/efabless/openlane2:2.3.10` pulled from GitHub Container Registry. PDK root: `~/.volare/sky130A`.
 
 ### §60.2 — RTL Changes Required
 
